@@ -1,0 +1,124 @@
+name: Node service (cPanel)
+
+on:
+  workflow_call:
+    inputs:
+      app_path:
+        description: "Absolute path on the cPanel server (e.g. /home/user/apps/gateway)"
+        required: true
+        type: string
+      node_version:
+        description: "Node version (must match the app's Node version in cPanel)"
+        required: false
+        type: string
+        default: "20"
+      build_command:
+        description: "Build command to run before deploy (e.g. `npm run build`)"
+        required: false
+        type: string
+        default: "npm run build"
+      run_tests:
+        description: "Run npm test before deploying"
+        required: false
+        type: boolean
+        default: true
+      passenger_app:
+        description: "If true, run `touch tmp/restart.txt` after deploy"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      CPANEL_HOST:
+        required: true
+      CPANEL_USER:
+        required: true
+      CPANEL_SSH_KEY:
+        required: true
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: |
+          if npm run | grep -q " lint"; then npm run lint; else echo "no lint script"; fi
+
+      - name: Test
+        if: ${{ inputs.run_tests }}
+        run: |
+          if npm run | grep -q " test"; then npm test --if-present; else echo "no test script"; fi
+
+      - name: Build
+        run: ${{ inputs.build_command }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            .next
+            public
+            package.json
+            package-lock.json
+            next.config.*
+            !node_modules
+
+  deploy:
+    needs: lint-test-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-${{ inputs.app_path }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CPANEL_SSH_KEY }}
+
+      - name: Add cPanel host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.CPANEL_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rsync project to cPanel
+        run: |
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude '.env.local' \
+            ./ ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:${{ inputs.app_path }}/
+
+      - name: npm ci --omit=dev on server
+        run: |
+          ssh ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }} bash -lc "'
+            set -e
+            cd ${{ inputs.app_path }}
+            if command -v nvm >/dev/null 2>&1; then nvm use ${{ inputs.node_version }} || true; fi
+            npm ci --omit=dev
+          '"
+
+      - name: Restart Passenger
+        if: ${{ inputs.passenger_app }}
+        run: |
+          ssh ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }} \
+            "mkdir -p ${{ inputs.app_path }}/tmp && touch ${{ inputs.app_path }}/tmp/restart.txt"
