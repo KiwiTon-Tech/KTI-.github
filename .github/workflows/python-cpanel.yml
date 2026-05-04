@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: true
+      sync_env:
+        description: "If true, write DOTENV_CONTENT secret to <app_path>/.env on the server (mode 600). Use to rotate secrets."
+        required: false
+        type: boolean
+        default: false
     secrets:
       CPANEL_HOST:
         required: true
@@ -29,6 +34,9 @@ on:
         required: true
       CPANEL_SSH_KEY:
         required: true
+      DOTENV_CONTENT:
+        description: "Full body of the service's .env file. Required only when sync_env=true."
+        required: false
 
 jobs:
   lint-and-test:
@@ -96,6 +104,29 @@ jobs:
             --exclude 'tests' \
             --exclude 'node_modules' \
             ./ ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:${{ inputs.app_path }}/
+
+      - name: Sync .env to server
+        if: ${{ inputs.sync_env }}
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
+        run: |
+          if [ -z "$DOTENV_CONTENT" ]; then
+            echo "::error::sync_env=true but DOTENV_CONTENT secret is empty."
+            exit 1
+          fi
+          # Write locally, then SCP atomically and chmod 600.
+          umask 077
+          printf '%s\n' "$DOTENV_CONTENT" > .env.deploy
+          scp -o StrictHostKeyChecking=yes .env.deploy \
+            ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:${{ inputs.app_path }}/.env.new
+          ssh ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }} bash -lc "'
+            set -e
+            cd ${{ inputs.app_path }}
+            chmod 600 .env.new
+            if [ -f .env ]; then cp -p .env .env.bak.\$(date +%Y%m%d%H%M%S); fi
+            mv .env.new .env
+          '"
+          rm -f .env.deploy
 
       - name: Install dependencies on server
         run: |
