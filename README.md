@@ -2,13 +2,16 @@
 
 Internal repository hub for the **KiwiTon Investments** trading platform.
 
-This `.github` repository hosts:
+This repository hosts:
 
-- The organization profile shown at <https://github.com/KiwiTon-Tech>
-  (see `profile/README.md`).
 - **Reusable GitHub Actions workflows** consumed by every other `KTI-*`
   repository — see `.github/workflows/`.
-- Default issue / pull-request templates.
+- Default issue / pull-request templates (TBD).
+
+> Note: this repo is named `KTI-.github` (with prefix) for naming consistency
+> with the rest of the suite. Because of that, GitHub does **not** render
+> any `profile/README.md` here as the org landing page. If an org profile is
+> ever wanted, create a separate repo named exactly `.github`.
 
 ## Service Catalog
 
