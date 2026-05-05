@@ -261,7 +261,21 @@ source ~/.bashrc
 Run for every new `KTI-*` Python service (~5 min). The example uses
 `KTI-NLP-Service`.
 
-### C1. Create the cPanel Python App
+### C1. Add the Cloudflare DNS record
+
+Cloudflare → DNS → **Add record**:
+
+| Type | Name | Content | Proxy status |
+|------|------|---------|--------------|
+| A | `<service>` | `<server-IP>` | **DNS only** (grey cloud) |
+
+Internal services (`nlp`, `broker`, `market`, `news`, `ml`) **must** be
+DNS-only. Cloudflare's proxy silently times out long-running POSTs (e.g.
+a FinBERT batch), which breaks service-to-service pipelines. Only public /
+browser-facing subdomains (`api`, `www`, apex) should be Proxied with a
+Cloudflare Origin Certificate.
+
+### C2. Create the cPanel Python App
 
 cPanel → **Setup Python App** → Create:
 
@@ -271,21 +285,13 @@ cPanel → **Setup Python App** → Create:
 - Startup file: `passenger_wsgi.py`
 - Entry point: `application`
 
-This creates `/home/kiwiton/apps/KTI-NLP-Service/` (empty) and a virtualenv at
-`/home/kiwiton/virtualenv/apps/KTI-NLP-Service/3.11/`.
+This creates `/home/kiwiton/apps/KTI-NLP-Service/` (with cPanel's placeholder
+files) and a virtualenv at `/home/kiwiton/virtualenv/apps/KTI-NLP-Service/3.11/`.
 
-### C2. Add the Cloudflare DNS record
-
-Cloudflare → DNS → **Add record**:
-
-| Type | Name | Content | Proxy status |
-|------|------|---------|--------------|
-| A | `<service>` | `<server-IP>` | **DNS only** (grey cloud) |
-
-Internal services (`nlp`, `broker`, `market`, `news`, `ml`) **must** be
-DNS-only — Cloudflare's proxy interferes with Passenger's first-load and
-adds latency to service-to-service calls. Public/browser-facing subdomains
-(`api`, `www`, apex) should be Proxied with a Cloudflare Origin Certificate.
+> ⚠ **cPanel overwrites `passenger_wsgi.py`** with a generic
+> `imp.load_source(...)` template that recursively imports itself and causes
+> an infinite-recursion crash on boot. C3 below restores the real file from
+> git immediately after clone.
 
 ### C3. Clone, configure, install
 
@@ -293,28 +299,40 @@ In the cPanel terminal:
 
 ```bash
 SVC=KTI-NLP-Service
-rm -rf /home/kiwiton/apps/$SVC
-cd /home/kiwiton/apps
 
-# First clone uses an explicit token (helper isn't invoked for the URL form),
-# then we rewrite the remote so future pulls use the credential helper.
+# 1. Remove cPanel's placeholder app directory (keep the venv)
+rm -rf /home/kiwiton/apps/$SVC
+
+# 2. Clone the repo (uses the GitHub App token helper)
+cd /home/kiwiton/apps
 TOKEN=$(~/bin/kti-github-token)
 git clone https://x-access-token:${TOKEN}@github.com/KiwiTon-Tech/$SVC.git
 cd $SVC
 git remote set-url origin https://github.com/KiwiTon-Tech/$SVC.git
 
-# Configure runtime env
+# 3. Force-restore OUR passenger_wsgi.py in case cPanel re-plants its template
+#    between now and the Passenger restart. Safe no-op if already correct.
+git checkout -- passenger_wsgi.py
+head -5 passenger_wsgi.py   # must show OUR docstring, not "imp.load_source"
+
+# 4. Configure runtime env
 cp .env.example .env
 chmod 600 .env
-# Edit .env to set absolute paths for any cache vars (e.g. TRANSFORMERS_CACHE).
-# Relative paths break under Passenger because the working directory differs.
+# Edit .env for THIS service's values. Use ABSOLUTE paths for any cache vars
+# (e.g. TRANSFORMERS_CACHE) — relative paths break under Passenger because
+# the working directory shifts. Use ``NODE_ENV=production`` and
+# ``PROD_DATABASE_URI=postgresql://...@localhost:5432/...?sslmode=disable``
+# if the service uses KTI-DB.
 
-# Install dependencies in the cPanel-managed virtualenv
+# 5. Install dependencies in the cPanel-managed virtualenv
 source /home/kiwiton/virtualenv/apps/$SVC/3.11/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Restart Passenger
+# 6. Smoke-test the import path BEFORE hitting Passenger (shows real errors)
+python passenger_wsgi.py    # should exit silently; any traceback is a real bug
+
+# 7. Restart Passenger
 mkdir -p tmp && touch tmp/restart.txt
 ```
 
@@ -389,6 +407,69 @@ Don't run helper scripts with bare `python3` — it resolves to Python 3.6
 which is too old for modern crypto deps. Always shebang to
 `/home/kiwiton/venvs/kti-tools/bin/python` (helper scripts) or the app's
 own venv (services).
+
+### cPanel overwrites `passenger_wsgi.py`
+
+Creating a Python App in cPanel **replaces** your `passenger_wsgi.py` with
+a generic template that does
+`imp.load_source('wsgi', 'passenger_wsgi.py')` — which recursively imports
+itself on boot and crashes with `RecursionError`. Symptom: browser shows
+"We're sorry, but something went wrong: Web application could not be started."
+
+Fix: `git checkout -- passenger_wsgi.py` right after the clone (step C3
+already does this). Re-run after any future cPanel UI edit to the app.
+
+### `.env` doesn't reach `os.getenv()` readers
+
+Pydantic-settings reads `.env` into its model but does **not** populate
+`os.environ`. Dependencies like `kti_db.connection` use `os.getenv()`
+directly, so without an explicit `load_dotenv()` they see empty values and
+fail with "Database not configured".
+
+Fix: load `.env` at the top of `passenger_wsgi.py` before any app imports:
+
+```python
+from dotenv import load_dotenv
+load_dotenv(os.path.join(APP_ROOT, ".env"))
+```
+
+### Pydantic-settings `list[T]` / `dict[T]` JSON decode
+
+Pydantic-settings tries JSON-decoding env values for non-scalar fields
+**before** `@field_validator` runs. A CSV env var raises `SettingsError`
+at boot. Annotate with `NoDecode` to keep the raw string:
+
+```python
+from typing import Annotated
+from pydantic_settings import NoDecode
+rss_feeds: Annotated[list[FeedSpec], NoDecode] = Field(default_factory=list)
+```
+
+### Passenger swallows stderr
+
+Don't hunt for log files. The fastest way to get a real traceback:
+
+```bash
+source /home/kiwiton/virtualenv/apps/$SVC/3.11/bin/activate
+cd /home/kiwiton/apps/$SVC
+python passenger_wsgi.py   # crashes print inline
+```
+
+### `CREATE EXTENSION` fails on shared Postgres
+
+cPanel Postgres doesn't grant superuser, so extensions like `uuid-ossp` and
+`pgcrypto` can't be created with `CREATE EXTENSION`. Use built-ins:
+
+- `gen_random_uuid()` (PG 13+) instead of `uuid_generate_v4()` (uuid-ossp).
+- `md5()` / `encode(digest(...))` are available without pgcrypto in most
+  managed installs.
+
+### Migration-runner atomicity
+
+If a migration runner puts all files in one transaction, a late failure
+rolls back successful earlier migrations. Use **per-file commits** so
+partial progress is preserved. `kti_db.connection.run_migrations()`
+already does this.
 
 ---
 

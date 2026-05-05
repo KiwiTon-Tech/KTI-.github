@@ -1,6 +1,6 @@
 # KiwiTon Investments — Microservices Architecture
 
-> **Status**: In progress (Phase 1b shipping)
+> **Status**: In progress (Phase 1b complete)
 > **Last updated**: 2026-05-05
 > **Owner**: Zander Bolyanatz
 
@@ -39,14 +39,14 @@ shared/infra repos.
 | 1 | [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | TS (Next.js) | BFF / API gateway | Pending |
 | 2 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Python (FastAPI) | Alpaca adapter | Pending |
 | 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | Pending |
-| 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live on cPanel |
-| 5 | [`KTI-News-Sentiment-Service`](https://github.com/KiwiTon-Tech/KTI-News-Sentiment-Service) | Python (FastAPI) | News ingest + sentiment API | 🚧 Scaffolded, deploying |
+| 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live at `nlp.kiwiton-investments.com` |
+| 5 | [`KTI-News-Sentiment-Service`](https://github.com/KiwiTon-Tech/KTI-News-Sentiment-Service) | Python (FastAPI) | News ingest + sentiment API | ✅ Live at `news.kiwiton-investments.com` |
 | 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI) | ML train + predict | Pending |
 | 7 | [`KTI-Strategy-Engine`](https://github.com/KiwiTon-Tech/KTI-Strategy-Engine) | Python | Long-running worker | Pending |
 | 8 | [`KTI-Backtest-Service`](https://github.com/KiwiTon-Tech/KTI-Backtest-Service) | Python | Job queue + workers | Pending |
 | 9 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator)* | Python | Control plane | Optional |
 | 10 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | YAML / shell | Infra config | Pending |
-| 11 | [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | SQL + Python + TS | Central schema + DAL | 🚧 In use |
+| 11 | [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | SQL + Python + TS | Central schema + DAL | ✅ Deployed (8 migrations applied) |
 | 12 | [`KTI-Contracts`](https://github.com/KiwiTon-Tech/KTI-Contracts)* | OpenAPI + codegen | Typed cross-service clients | Optional |
 | 13 | [`KTI-.github`](https://github.com/KiwiTon-Tech/KTI-.github) | YAML + MD | Reusable CI workflows + deployment playbook | ✅ Live |
 
@@ -513,9 +513,9 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 |-------|------|--------|
 | 0 | Freeze feature work on `backend/`, `api/`, `kiwiton_graphql/`. Pick one as the survivor (recommend `api/`). Delete `ai_bot/` duplicates and empty `ai-bot/`. | ⬜ |
 | 0a | **Stand up `KTI-.github`** — reusable CI workflows + cPanel deployment playbook. | ✅ |
-| 0b | **Stand up `KTI-DB`** — SQL migrations + Python/TS DAL. Central schema repo all services depend on. | 🚧 In use; more migrations to come |
+| 0b | **Stand up `KTI-DB`** — SQL migrations + Python/TS DAL. Central schema repo all services depend on. | ✅ Deployed at `~/tools/KTI-DB` on cPanel; 8 migrations applied |
 | 1 | **Extract `KTI-NLP-Service`** — FinBERT over FastAPI, zero shared state. | ✅ Live at `nlp.kiwiton-investments.com` |
-| 1b | **Extract `KTI-News-Sentiment-Service`** — RSS scrape + NLP call + KTI-DB persistence. Drop tkinter/selenium/alpaca. | 🚧 Scaffolded; deploying |
+| 1b | **Extract `KTI-News-Sentiment-Service`** — RSS scrape + NLP call + KTI-DB persistence. Drop tkinter/selenium/alpaca. | ✅ Live at `news.kiwiton-investments.com`; 88 articles scored in first run |
 | 2 | **Extract `KTI-Broker-Service`** — biggest DRY win; kills the Python/TS Alpaca duplication. | ⬜ |
 | 3 | **Extract `KTI-Market-Data-Service`** — frontend + strategies share one feed. | ⬜ |
 | 4 | **Extract `KTI-ML-Service`** and **`KTI-Backtest-Service`** — separates batch from online workloads. | ⬜ |
@@ -537,7 +537,86 @@ Every phase ends with a working system; nothing is a big-bang migration.
 
 ---
 
-## 8. Open Questions
+## 8. Operational Lessons Learned
+
+Captured from Phase 1 / 1b deploys so future services don't re-hit them.
+Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
+
+### cPanel / Passenger
+
+- **cPanel overwrites `passenger_wsgi.py`** when you create a Python App,
+  replacing our file with a generic `imp.load_source('wsgi', 'passenger_wsgi.py')`
+  template that recursively imports itself (infinite recursion on boot).
+  **Always run `git checkout -- passenger_wsgi.py`** immediately after
+  creating the Python App.
+- **`a2wsgi.ASGIMiddleware` does NOT fire ASGI lifespan events.** Any
+  FastAPI `lifespan` hook is silently skipped under Passenger. Workaround:
+  call the startup logic explicitly from `passenger_wsgi.py`
+  (`initialize()` or `load_model()`). Applied to `KTI-NLP-Service` and
+  `KTI-News-Sentiment-Service`.
+- **Passenger swallows stderr.** Don't waste time hunting log files \u2014
+  run `python passenger_wsgi.py` directly from the app venv to get the
+  real traceback.
+- **`.env` must be loaded into `os.environ` explicitly** for dependencies
+  that use `os.getenv()` directly (e.g. `kti_db.connection`).
+  Pydantic-settings reads `.env` into its model but does NOT populate
+  `os.environ`. Call `load_dotenv(APP_ROOT/".env")` at the top of
+  `passenger_wsgi.py`.
+- **System `python3` on CloudLinux is Python 3.6** \u2014 unusable for modern
+  deps. Use `/opt/alt/python311/bin/python3.11` for any standalone tooling;
+  services use the cPanel-managed app venv.
+- **cPanel Postgres does not grant superuser.** `CREATE EXTENSION` fails.
+  Use `gen_random_uuid()` (built into PG 13+) instead of `uuid-ossp`'s
+  `uuid_generate_v4()`.
+
+### Cloudflare
+
+- **Grey-cloud every internal service** (`nlp`, `news`, future `broker`,
+  `market`, `ml`). Proxied subdomains silently time-out long-running POSTs
+  (e.g. FinBERT batches of 32), breaking service-to-service pipelines.
+  Only public / browser-facing subdomains should be Proxied (orange):
+  `api`, `www`, apex.
+- **Proxied subdomains break AutoSSL** \u2014 the HTTP-01 challenge hits
+  Cloudflare's edge and 404s. For proxied public domains, issue a
+  Cloudflare **Origin Certificate** (15-year) and install it on cPanel
+  with SSL/TLS mode set to **Full (strict)**.
+
+### Pydantic-settings
+
+- **`list[T]` and `dict[T]` fields are JSON-decoded before validators**
+  unless annotated with `NoDecode`:
+  ```python
+  from typing import Annotated
+  from pydantic_settings import NoDecode
+  rss_feeds: Annotated[list[FeedSpec], NoDecode] = Field(default_factory=list)
+  ```
+  Without this, any env value that isn't valid JSON (e.g. our
+  `"stocks|url,crypto|url"` CSV) raises `SettingsError` at boot.
+
+### KTI-DB migrations
+
+- **Run each migration in its own transaction.** A single transaction
+  for all migrations rolls back successful earlier ones when a later one
+  fails. `connection.run_migrations()` now commits per-file.
+- Expose an **idempotent migration runner**: all migrations use
+  `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... IF NOT EXISTS` / etc.
+  so re-running after a partial failure is safe.
+
+### GitHub / CI
+
+- **GitHub Free disallows org-level secrets on private repos** \u2014 must set
+  per-repo. See `docs/CPANEL_DEPLOYMENT.md` Part A5 for the `gh secret`
+  bulk-seeding loop.
+- **Never push credentials back in chat or commits.** Use URL-encoded
+  connection strings in `.env` files (mode 600) and keep `.env` in
+  `.gitignore`. `.env.example` is the shared template.
+- **Git credential helper on cPanel** (configured globally in Part B5 of
+  the playbook) makes `pip install git+https://github.com/KiwiTon-Tech/...`
+  Just Work \u2014 no manual token plumbing per repo.
+
+---
+
+## 9. Open Questions
 
 - **Service mesh / mTLS?** — Deferred. Shared cPanel means we can't run
   Envoy/Istio anyway. The `X-KTI-Token` shared-secret pattern is good
