@@ -93,5 +93,12 @@ GitHub Free **disallows org-level secrets on private repos**. Workaround:
 
 ## Architecture
 
-See `MICROSERVICES_ARCHITECTURE.md` in the root planning workspace for the
-full service breakdown, communication flows, and rollout plan.
+See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full service
+breakdown, communication flows, data model, and rollout plan.
+
+## Documents in this repo
+
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — service catalog, topology,
+  communication patterns, rollout plan.
+- [`docs/CPANEL_DEPLOYMENT.md`](./docs/CPANEL_DEPLOYMENT.md) — end-to-end
+  cPanel setup playbook (GitHub App, token helper, per-service deploy).
