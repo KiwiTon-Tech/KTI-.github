@@ -41,7 +41,7 @@ shared/infra repos.
 | 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | ✅ Live at `market.kiwiton-investments.com` (REST only; WS deferred to Phase 3b) |
 | 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live at `nlp.kiwiton-investments.com` |
 | 5 | [`KTI-News-Sentiment-Service`](https://github.com/KiwiTon-Tech/KTI-News-Sentiment-Service) | Python (FastAPI) | News ingest + sentiment API | ✅ Live at `news.kiwiton-investments.com` |
-| 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI) | ML train + predict | Pending |
+| 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI) | ML train + predict | ✅ Live at `ml.kiwiton-investments.com` |
 | 7 | [`KTI-Strategy-Engine`](https://github.com/KiwiTon-Tech/KTI-Strategy-Engine) | Python | Long-running worker | Pending |
 | 8 | [`KTI-Backtest-Service`](https://github.com/KiwiTon-Tech/KTI-Backtest-Service) | Python | Job queue + workers | Pending |
 | 9 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator)* | Python | Control plane | Optional |
@@ -519,7 +519,8 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 2 | **Extract `KTI-Broker-Service`** — biggest DRY win; kills the Python/TS Alpaca duplication. | ✅ Live at `broker.kiwiton-investments.com` (account, orders w/ idempotency, positions, clock, calendar, portfolio history, watchlists, assets, statements via direct REST bypass for `/v2/account/activities`) |
 | 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
 | 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⬜ |
-| 4 | **Extract `KTI-ML-Service`** and **`KTI-Backtest-Service`** — separates batch from online workloads. | ⬜ |
+| 4a | **Extract `KTI-ML-Service`** — separates ML train/predict from the strategy engine. | ✅ Live at `ml.kiwiton-investments.com`. End-to-end pipeline confirmed: `/train SPY` (730d bars from market-data + 34 features + walk-forward XGBoost in 38s) → registry → `/predict SPY` returns signal+confidence+version_id. Phase 4b: adaptive thresholds, expected-value gating, scheduled retrain via cron, async `/train` for the full symbol list. |
+| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | ⬜ |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ⬜ |
 | 6 | **Stand up `KTI-Observability`** — structured logging + Prometheus + Grafana. | ⬜ |
 
