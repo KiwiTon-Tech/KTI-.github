@@ -37,8 +37,8 @@ shared/infra repos.
 | # | Repo | Language | Type | Status |
 |---|------|----------|------|--------|
 | 1 | [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | TS (Next.js) | BFF / API gateway | Pending |
-| 2 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Python (FastAPI) | Alpaca adapter | Pending |
-| 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | Pending |
+| 2 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Python (FastAPI) | Alpaca adapter | ✅ Live at `broker.kiwiton-investments.com` |
+| 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | ✅ Live at `market.kiwiton-investments.com` (REST only; WS deferred to Phase 3b) |
 | 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live at `nlp.kiwiton-investments.com` |
 | 5 | [`KTI-News-Sentiment-Service`](https://github.com/KiwiTon-Tech/KTI-News-Sentiment-Service) | Python (FastAPI) | News ingest + sentiment API | ✅ Live at `news.kiwiton-investments.com` |
 | 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI) | ML train + predict | Pending |
@@ -516,8 +516,9 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 0b | **Stand up `KTI-DB`** — SQL migrations + Python/TS DAL. Central schema repo all services depend on. | ✅ Deployed at `~/tools/KTI-DB` on cPanel; 8 migrations applied |
 | 1 | **Extract `KTI-NLP-Service`** — FinBERT over FastAPI, zero shared state. | ✅ Live at `nlp.kiwiton-investments.com` |
 | 1b | **Extract `KTI-News-Sentiment-Service`** — RSS scrape + NLP call + KTI-DB persistence. Drop tkinter/selenium/alpaca. | ✅ Live at `news.kiwiton-investments.com`; 88 articles scored in first run |
-| 2 | **Extract `KTI-Broker-Service`** — biggest DRY win; kills the Python/TS Alpaca duplication. | ⬜ |
-| 3 | **Extract `KTI-Market-Data-Service`** — frontend + strategies share one feed. | ⬜ |
+| 2 | **Extract `KTI-Broker-Service`** — biggest DRY win; kills the Python/TS Alpaca duplication. | ✅ Live at `broker.kiwiton-investments.com` (account, orders w/ idempotency, positions, clock, calendar, portfolio history, watchlists, assets, statements via direct REST bypass for `/v2/account/activities`) |
+| 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
+| 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⬜ |
 | 4 | **Extract `KTI-ML-Service`** and **`KTI-Backtest-Service`** — separates batch from online workloads. | ⬜ |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ⬜ |
 | 6 | **Stand up `KTI-Observability`** — structured logging + Prometheus + Grafana. | ⬜ |
@@ -568,6 +569,60 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
 - **cPanel Postgres does not grant superuser.** `CREATE EXTENSION` fails.
   Use `gen_random_uuid()` (built into PG 13+) instead of `uuid-ossp`'s
   `uuid_generate_v4()`.
+
+### alpaca-py SDK gaps
+
+- **Account activities are Broker-API-only in alpaca-py 0.34.0.**
+  `GetAccountActivitiesRequest` lives in `alpaca.broker.requests` and the
+  `get_account_activities` method exists only on `BrokerClient`, not
+  `TradingClient`. Importing it from `alpaca.trading.requests` raises
+  `ImportError`. The underlying Trading REST endpoint
+  `GET /v2/account/activities` works fine for personal accounts though,
+  so `KTI-Broker-Service` calls it directly via `httpx` with the same
+  `APCA-API-KEY-ID` / `APCA-API-SECRET-KEY` headers it already holds, and
+  wraps each response row in `SimpleNamespace` so the existing serializer
+  (which uses `getattr`) keeps working. Pattern to remember when porting
+  more endpoints: when alpaca-py is missing a wrapper, drop down to the
+  raw REST API rather than fight the SDK.
+- **Plain-text 500s leak when an exception escapes FastAPI.** Without a
+  generic `Exception` handler, an unhandled error (e.g., the
+  `ImportError` above at first request) bubbles into `a2wsgi` and
+  Passenger renders an HTML/plain-text 500. Combined with Passenger
+  swallowing stderr, this is unusably opaque. Every KTI service should
+  register an `@app.exception_handler(Exception)` that returns
+  `{"detail": "{type(exc).__name__}: {exc}"}` as JSON 500. Already on
+  `KTI-Broker-Service` and `KTI-Market-Data-Service`; copy into the
+  next service. *Caveat:* Passenger still returns a bare HTML 502 if
+  the worker errors before FastAPI can write the response body (e.g.
+  Pydantic raising during request-construction in the route — see the
+  `NewsRequest` symbols-as-string gotcha below). Diagnose those by
+  invoking the SDK call directly via `python` in the venv, not just
+  the curl response.
+- **`pytz` is a hidden alpaca-py 0.34.0 transitive dep that pandas 3.x
+  dropped.** alpaca-py imports `pytz` at module load. With pandas 1.x
+  / 2.x it was pulled in transitively; pandas 3.0 dropped the hard dep
+  on pytz, so `pip install alpaca-py==0.34.0` no longer brings it in
+  automatically. Symptom: `/ready` returns
+  `Alpaca data probe failed`, and direct endpoint calls return JSON
+  500 `ModuleNotFoundError: No module named 'pytz'`. Fix: pin
+  `pytz==2024.2` explicitly in every KTI service's `requirements.txt`
+  that depends on alpaca-py (broker + market-data so far).
+- **`NewsRequest.symbols` is a comma-separated string, not a list.**
+  Unlike `StockBarsRequest` / `CryptoBarsRequest` (which take
+  `symbol_or_symbols: list[str]`), `NewsRequest.symbols` is validated
+  as `str` and expects `"AAPL,MSFT"`-style input. Passing a list
+  raises `pydantic.ValidationError` inside the route, which (per the
+  caveat above) escapes as a Passenger 502. The market-data service
+  joins symbols with `","` inside `AlpacaDataClient.get_news()` so
+  callers can still pass `?symbols=AAPL,MSFT` like every other
+  endpoint.
+- **`NewsSet.data["news"]`, not `NewsSet.news`.** alpaca-py's
+  `NewsSet` exposes the article list at `result.data["news"]`, not via
+  a `.news` attribute (which only exists on the underlying `News`
+  models, confusingly). `dir(NewsSet)` shows `data` and
+  `next_page_token` as the only payload-bearing attrs.
+  `KTI-Market-Data-Service` reads via `getattr(result, "data", None)`
+  with fall-throughs for the other shapes the SDK sometimes returns.
 
 ### Cloudflare
 
