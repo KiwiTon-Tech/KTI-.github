@@ -677,7 +677,7 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
 | 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⏸️ Deferred. Polling `/{bars,quotes,trades}/latest` is sufficient for current strategies; revisit when (a) a strategy's loop is faster than 2s, (b) consumers exceed ~5/symbol and Alpaca rate-limits bite even with caching, or (c) we move off shared cPanel and have somewhere stable to run a long-running daemon. Phase 3b' shipped instead: TTL cache in front of `/latest` endpoints + `kti-marketdata-client` polling SDK so callers don't reinvent backoff/batching. |
 | 4a | **Extract `KTI-ML-Service`** — separates ML train/predict from the strategy engine. | ✅ Live at `ml.kiwiton-investments.com`. End-to-end pipeline confirmed: `/train SPY` (730d bars from market-data + 34 features + walk-forward XGBoost in 38s) → registry → `/predict SPY` returns signal+confidence+version_id. Phase 4b: adaptive thresholds, expected-value gating, scheduled retrain via cron, async `/train` for the full symbol list. |
-| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | 🟡 In flight. Architecture decisions locked in: Lumibot engine (matches existing prod strategies + supports backtest→live symmetry), Postgres `backtest_jobs` queue with `FOR UPDATE SKIP LOCKED` (no Redis), cron-spawned ephemeral workers (~5min budget per tick), soft cancel via `cancel_requested` flag, 2 global concurrency cap. KTI-DB migrations 002 (`backtest_results`) + 006 (`backtest_jobs`) already applied. Repo skeleton landed: FastAPI chassis + Passenger entry + CI; next session extracts DAL + routes from legacy `KiwiTon-Strategy-Engine` and wires the Lumibot engine adapter + cron worker. |
+| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | 🟡 In flight. **Session 1 done (2026-05-14):** chassis live at `backtest.kiwiton-investments.com`. FastAPI app + Passenger entry + `/health` (200 ok) + `/ready` (reports `db_configured: true` against shared kti-db) + global exception handler. Cron-spawned worker scaffold (`python -m app.worker --check` returns 0 in prod). Pydantic settings tied to cPanel-wide `PROD_DATABASE_URI` + `SHARED_AUTH_TOKEN` convention. CI lint-and-test job green; deploy job blocked on org-secret access (separate fix). 11 chassis tests green locally. KTI-DB migrations 002 (`backtest_results`) + 006 (`backtest_jobs`) already applied. **Session 2 plan:** (a) port `KiwiTon-Strategy-Engine/backend/db/backtest_jobs.py` DAL to psycopg 3, (b) port `api/routes/backtest_routes.py` to FastAPI, (c) add Lumibot + numpy/pandas/ta pins, (d) build `app/engine/{base,lumibot_engine}.py` + in-tree strategy registry (1 reference SMA-crossover strategy), (e) replace worker stub with real claim→run→persist loop respecting `cancel_requested`, (f) end-to-end SPY integration test, (g) register 2 cron entries for the concurrency cap. |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ⬜ |
 | 6 | **Stand up `KTI-Observability`** — structured logging + Prometheus + Grafana. | ⬜ |
 
@@ -814,6 +814,31 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
 - Expose an **idempotent migration runner**: all migrations use
   `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... IF NOT EXISTS` / etc.
   so re-running after a partial failure is safe.
+
+### Cross-service env var conventions
+
+- **`PROD_DATABASE_URI` is the canonical name** for the shared kti-db
+  DSN across every KTI service on cPanel — *not* `DATABASE_URL` (despite
+  `KTI-DB/.env.example` also documenting `DATABASE_URL` for legacy
+  reasons). Originally adopted by `KTI-News-Sentiment-Service` and the
+  legacy `KiwiTon-Strategy-Engine/backend/db/connection.py`. New
+  services must mirror this key so a single sed/grep against any one
+  service's `.env` produces the value to drop into every other.
+  `KTI-Backtest-Service` had to rename `DATABASE_URL` →
+  `PROD_DATABASE_URI` post-deploy when `/ready` reported `degraded`
+  despite the value being copied correctly.
+- **`SHARED_AUTH_TOKEN`** is per-service — each service generates and
+  holds its own; callers configure their target's token under a name
+  like `MARKET_DATA_TOKEN` or `NEWS_SENTIMENT_TOKEN`. Don't reuse one
+  token across services even if it's tempting; a leak compromises the
+  whole mesh.
+- **Templates rot fast.** When a service renames an env key, every
+  `.env` already deployed on cPanel still has the old key, and `sed`
+  substitutions like `s|^PROD_DATABASE_URI=.*|...|` silently no-op on
+  the missing key. Workflow: `cp .env.example .env` (overwriting)
+  *before* re-injecting secrets, so the new template's keys are
+  present for `sed` to target. Discovered during `KTI-Backtest-Service`
+  session 1 deploy.
 
 ### GitHub / CI
 
