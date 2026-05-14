@@ -354,15 +354,55 @@ the orchestrator / `KTI-Gateway`.
 **Purpose**: Run backtests without affecting live trading.
 
 **Responsibilities**
-- Queue (Redis / RabbitMQ) of backtest jobs.
-- Worker pool that runs historical simulations.
-- Persists results to Postgres; serves them via REST.
+- **Persistent job queue in Postgres.** `backtest_jobs` table (KTI-DB
+  migration 006) holds the queue; workers claim rows with `SELECT ...
+  FOR UPDATE SKIP LOCKED`. No Redis dep — we already have Postgres and
+  scale (≤10 concurrent jobs ever) doesn't justify another moving part.
+- **Cron-spawned ephemeral workers.** `* * * * * python -m app.worker
+  --max-jobs=1 --max-runtime=290` per concurrency slot. Each tick spawns
+  a fresh process, claims one job, runs it, exits. Solves the "no
+  long-running daemons on shared cPanel" problem we hit in Phase 3b
+  without the keep-alive watchdog tax.
+- **Backtest engine: Lumibot.** Picked over `backtesting.py` because the
+  existing prod strategies (`MLTrader`, `CryptoTrader`, `ForexTrader`)
+  are already Lumibot `Strategy` subclasses, and Lumibot's
+  broker-abstraction lets the same class run live via Alpaca with no
+  code change. Cold-start tax (~2–3s of imports per cron tick) is
+  negligible against typical 30s–5min backtest runtimes.
+- **Strategy registry.** Service ships a small in-tree registry for
+  Phase 4b reference strategies; Phase 5 wires real Strategy-Engine
+  strategies in via a `kti-strategies` extras-style package or import
+  paths.
+- **Concurrency cap.** Hard ceiling of 2 simultaneously-running
+  backtests across all workers (per `LIVE_BACKTESTING_SPEC.md` Decision
+  5). Cron entries enforce this implicitly (run N parallel workers);
+  API also rejects `POST /run` at the cap to surface a fast 429.
+- **Soft cancel.** `cancel_requested` flag on the job row; worker checks
+  between Lumibot iterations and bails at the next checkpoint.
+- **Results persistence.** On success, worker writes summary row to
+  `backtest_results` (KTI-DB migration 002) and full result blob to
+  `backtest_jobs.result` (jsonb). Foreign key links the two so the
+  read-only `/backtests` history page picks up completed runs.
 
 **Pulled from**: `Back_Testing/**`, `backtest_runner.py`,
-`api/routes/backtest_routes.py`, `app/api/backtests/**`,
-`src/trading/backtesting/**`, `LIVE_BACKTESTING_SPEC.md`.
+`KiwiTon-Strategy-Engine/api/routes/backtest_routes.py`,
+`KiwiTon-Strategy-Engine/backend/db/backtest_jobs.py` (DAL — already
+built, needs port to psycopg 3 + FastAPI shapes),
+`app/api/backtests/**`, `src/trading/backtesting/**`,
+`KiwiTon-Strategy-Engine/LIVE_BACKTESTING_SPEC.md` (design doc with all
+Decision 1–8 answers).
 
-**Exposes**: REST (`/jobs`, `/jobs/{id}`, `/results/{id}`).
+**Exposes**: REST
+- `GET  /health` — liveness probe (public).
+- `GET  /ready` — verifies Postgres + Lumibot import works.
+- `POST /backtests` — enqueue a job; returns `202 Accepted` + `job_id`.
+- `GET  /backtests` — list recent jobs, optional `?status=` filter.
+- `GET  /backtests/{id}` — full job row including `result` jsonb when
+  terminal.
+- `POST /backtests/{id}/cancel` — sets soft-cancel flag; idempotent;
+  returns `409` on terminal jobs.
+- `GET  /strategies` — catalogue of registered strategies + default
+  params for frontend dropdown.
 
 ---
 
@@ -495,7 +535,7 @@ query patterns.
 | News-sentiment-svc → nlp-service | REST (batched) | Bulk scoring after each scrape run |
 | News-sentiment-svc loop | In-process background thread | Runs every `SCRAPE_INTERVAL_SECONDS` (default 10 min) |
 | Gateway ← news-sentiment-svc | REST | Dashboard "Market Sentiment" panel |
-| Backtest-svc jobs | Redis/RabbitMQ queue | Bursty, async by nature |
+| Backtest-svc jobs | Postgres `backtest_jobs` table (SKIP LOCKED claim) | Persistent queue; survives restarts. Cron-spawned ephemeral workers claim+process+exit. No Redis needed. |
 | All services → observability | Prometheus scrape + Filebeat tail | Pull + push hybrid |
 
 ### 4.3 Shared data
@@ -508,8 +548,12 @@ query patterns.
   writing its own ORM. Gateway, strategy-engine, ml-service,
   news-sentiment-service, and backtest-service write; gateway reads for
   dashboards.
-- **Redis** — market-data cache, backtest job queue, rate-limit counters.
-  (Deferred; introduced when the first service actually needs it.)
+- **Redis** — originally planned for market-data cache + backtest job
+  queue + rate-limit counters. **Deferred indefinitely.** Phase 3b'
+  proved an in-process TTL cache covers the market-data use case;
+  Phase 4b uses Postgres `SELECT ... FOR UPDATE SKIP LOCKED` for the
+  job queue. Will revisit only if (a) we move off shared cPanel, or
+  (b) cross-service pub/sub becomes a real requirement.
 - **S3 / GCS** — ML model artifacts, backtest reports. (Deferred.)
 
 ### 4.4 Example: a live trade
@@ -633,7 +677,7 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
 | 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⏸️ Deferred. Polling `/{bars,quotes,trades}/latest` is sufficient for current strategies; revisit when (a) a strategy's loop is faster than 2s, (b) consumers exceed ~5/symbol and Alpaca rate-limits bite even with caching, or (c) we move off shared cPanel and have somewhere stable to run a long-running daemon. Phase 3b' shipped instead: TTL cache in front of `/latest` endpoints + `kti-marketdata-client` polling SDK so callers don't reinvent backoff/batching. |
 | 4a | **Extract `KTI-ML-Service`** — separates ML train/predict from the strategy engine. | ✅ Live at `ml.kiwiton-investments.com`. End-to-end pipeline confirmed: `/train SPY` (730d bars from market-data + 34 features + walk-forward XGBoost in 38s) → registry → `/predict SPY` returns signal+confidence+version_id. Phase 4b: adaptive thresholds, expected-value gating, scheduled retrain via cron, async `/train` for the full symbol list. |
-| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | ⬜ |
+| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | 🟡 In flight. Architecture decisions locked in: Lumibot engine (matches existing prod strategies + supports backtest→live symmetry), Postgres `backtest_jobs` queue with `FOR UPDATE SKIP LOCKED` (no Redis), cron-spawned ephemeral workers (~5min budget per tick), soft cancel via `cancel_requested` flag, 2 global concurrency cap. KTI-DB migrations 002 (`backtest_results`) + 006 (`backtest_jobs`) already applied. Repo skeleton landed: FastAPI chassis + Passenger entry + CI; next session extracts DAL + routes from legacy `KiwiTon-Strategy-Engine` and wires the Lumibot engine adapter + cron worker. |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ⬜ |
 | 6 | **Stand up `KTI-Observability`** — structured logging + Prometheus + Grafana. | ⬜ |
 
@@ -815,8 +859,11 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
 - **Service mesh / mTLS?** — Deferred. Shared cPanel means we can't run
   Envoy/Istio anyway. The `X-KTI-Token` shared-secret pattern is good
   enough until we move to a cluster.
-- **Event bus?** — Most flows are request/response. Only `KTI-Backtest-Service`
-  genuinely needs a queue. Revisit Kafka/NATS only if fan-out grows.
+- **Event bus?** — Most flows are request/response. The one async
+  workload (`KTI-Backtest-Service`) is served by a Postgres job table
+  with `SELECT ... FOR UPDATE SKIP LOCKED`, which is plenty for our
+  scale. Revisit Kafka/NATS only if cross-service fan-out grows beyond
+  point-to-point REST.
 - **Monorepo vs polyrepo?** — Polyrepo (13 GitHub repos) is the committed
   approach: independent deploys, per-repo CI, clear ownership. Revisit with
   Nx/Turborepo only if coordination pain becomes real.
