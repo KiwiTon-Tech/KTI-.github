@@ -50,6 +50,20 @@ jobs:
           python-version: ${{ inputs.python_version }}
           cache: pip
 
+      # Required for any requirements.txt that pulls private KiwiTon-Tech
+      # repos via git+https (e.g. kti-db). See ARCHITECTURE.md §8 "GitHub / CI".
+      # No-op if GH_DEPS_TOKEN isn't provided — public deps still install fine.
+      - name: Configure git auth for private GitHub deps
+        env:
+          GH_DEPS_TOKEN: ${{ secrets.GH_DEPS_TOKEN }}
+        run: |
+          if [ -n "$GH_DEPS_TOKEN" ]; then
+            git config --global url."https://x-access-token:${GH_DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
+            echo "Git insteadOf rule installed for github.com."
+          else
+            echo "GH_DEPS_TOKEN not set — skipping (only works for fully public deps)."
+          fi
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

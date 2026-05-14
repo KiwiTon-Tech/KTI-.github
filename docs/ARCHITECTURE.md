@@ -102,6 +102,119 @@ changing callers.
 **Exposes**: internal REST + optional gRPC. Secrets (`ALPACA_KEY`,
 `ALPACA_SECRET`) live **only** here.
 
+#### 3.2.1 Future: multi-broker support (e.g. crypto.com)
+
+Alpaca covers ~20 crypto coins, spot only, USD-only quotes, no perps, no
+staking. If/when we need broader altcoin coverage, deeper books for
+scalping, or derivatives, we add a **second broker adapter** behind the
+same internal contract — we do **not** teach `KTI-Strategy-Engine` to
+speak two broker APIs.
+
+**Decision rule (don't add early):** introduce a second adapter only when
+one of these is actually true:
+
+- A live strategy needs a coin Alpaca doesn't list.
+- Scalping requires deeper books / tighter spreads than Alpaca provides.
+- A strategy needs perps / leverage / shorts unavailable on Alpaca.
+- Portfolio-level risk controls (`utils/risk_management.py`) and the
+  kill-switch are battle-tested and survive multi-venue reconciliation.
+
+**Adapter contract (target shape, kept identical across brokers).** Every
+broker adapter MUST expose this REST surface. New adapters are accepted
+only when they pass a shared contract test suite that exercises each
+endpoint against a sandbox/paper account.
+
+| Method | Path | Purpose | Notes |
+|--------|------|---------|-------|
+| `GET`  | `/health` | Liveness | No auth. |
+| `GET`  | `/ready`  | Broker reachable + creds valid | Probes account endpoint. |
+| `GET`  | `/account` | Equity, cash, buying power | Returns canonical `Account` schema (see below). |
+| `GET`  | `/positions` | Open positions | Canonical `Position[]`. |
+| `GET`  | `/positions/{symbol}` | Single position | 404 if flat. |
+| `GET`  | `/orders` | List orders | Filters: `status`, `symbol`, `since`, `limit`. |
+| `POST` | `/orders` | Submit order | **Idempotency key required** (`Idempotency-Key` header). |
+| `GET`  | `/orders/{id}` | Order detail | |
+| `DELETE` | `/orders/{id}` | Cancel | |
+| `GET`  | `/clock` | Market open + next open/close | Crypto venues return `is_open: true` 24/7. |
+| `GET`  | `/assets` | Tradeable symbols on this venue | Used by gateway for symbol routing. |
+| `GET`  | `/portfolio/history` | Equity curve from broker | Optional; may be served from `KTI-DB` instead. |
+
+**Canonical schemas (pinned in `KTI-Contracts` once that repo lands; until
+then, mirrored in each adapter's `app/schemas.py`):**
+
+```python
+# Order request — venue-agnostic
+class OrderRequest(BaseModel):
+    symbol: str                    # canonical form: "BTC/USD", "AAPL"
+    side: Literal["buy", "sell"]
+    qty: Decimal | None = None     # exactly one of qty/notional
+    notional: Decimal | None = None
+    type: Literal["market", "limit", "stop", "stop_limit"]
+    time_in_force: Literal["day", "gtc", "ioc", "fok"]
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    client_order_id: str           # used as idempotency key
+    venue_hint: str | None = None  # optional override; gateway usually sets
+
+class Order(BaseModel):
+    id: str                        # adapter-local id
+    venue: Literal["alpaca", "cryptocom", ...]
+    client_order_id: str
+    symbol: str                    # canonical
+    venue_symbol: str              # raw form sent to broker (e.g. "BTC_USDT")
+    side: Literal["buy", "sell"]
+    qty: Decimal
+    filled_qty: Decimal
+    avg_fill_price: Decimal | None
+    status: Literal["new","partially_filled","filled","canceled","rejected","expired"]
+    submitted_at: datetime
+    filled_at: datetime | None
+    fees: Decimal                  # in quote currency
+```
+
+**Symbol normalisation.** Each adapter owns the bidirectional map between
+the **canonical KTI symbol** (`BTC/USD`, `AAPL`) and its venue-native form
+(`BTC_USDT` on crypto.com, `BTC/USD` on Alpaca). Callers only ever see
+canonical symbols. The map lives in `app/symbols.py` per adapter.
+
+**Routing.** `KTI-Gateway` (and `KTI-Strategy-Engine` when calling
+directly) decides which adapter to hit using, in order:
+
+1. Explicit `venue` field on the strategy config row in `strategy_configs`.
+2. Symbol prefix / asset class lookup (e.g. crypto with `:CDC` suffix → crypto.com).
+3. Default broker per asset class (env-configured: `DEFAULT_STOCK_BROKER=alpaca`,
+   `DEFAULT_CRYPTO_BROKER=alpaca`).
+
+**Database changes required before second adapter ships:**
+
+- `trades.venue text NOT NULL DEFAULT 'alpaca'`
+- `strategy_configs.venue text NOT NULL DEFAULT 'alpaca'`
+- `orders.venue text NOT NULL DEFAULT 'alpaca'` (if/when we mirror orders).
+- Composite index `(venue, broker_order_id)` for reconciliation.
+
+Migrations land in `KTI-DB` as a single versioned file, gated behind the
+go-live of the second adapter.
+
+**Repo layout when added.**
+
+```
+KTI-CryptoCom-Broker-Service/      # sibling of KTI-Broker-Service
+├── app/
+│   ├── main.py                     # same FastAPI shape
+│   ├── routes/{account,orders,positions,clock,assets,portfolio}.py
+│   ├── schemas.py                  # imports canonical schemas from KTI-Contracts
+│   ├── symbols.py                  # BTC/USD ↔ BTC_USDT map
+│   └── cryptocom_client.py         # HMAC-SHA256 signed REST + WS
+├── tests/contract/                 # shared suite (git submodule from KTI-Contracts)
+└── passenger_wsgi.py
+```
+
+**Subdomain**: `cryptocom-broker.kiwiton-investments.com` (grey-cloud,
+internal-only — same Cloudflare rules as other adapters).
+
+**Out of scope for v1 of the second adapter:** withdrawals/deposits,
+staking, derivatives. Spot trading + read endpoints only.
+
 ---
 
 ### 3.3 `KTI-Market-Data-Service`
@@ -668,7 +781,32 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
   `.gitignore`. `.env.example` is the shared template.
 - **Git credential helper on cPanel** (configured globally in Part B5 of
   the playbook) makes `pip install git+https://github.com/KiwiTon-Tech/...`
-  Just Work \u2014 no manual token plumbing per repo.
+  Just Work — no manual token plumbing per repo.
+- **GitHub Actions runners do NOT inherit that.** A fresh runner has no
+  credentials, so `pip install -r requirements.txt` fails with
+  `fatal: could not read Username for 'https://github.com'` on any line
+  pulling a private `KiwiTon-Tech` dep (e.g. `kti-db`). Symptom: every
+  `lint-and-test` run fails at the "Install dependencies" step before
+  the deploy job ever queues, so production stays on whatever was last
+  hand-deployed even though `main` has long since moved on. Fix:
+  1. Create a fine-grained PAT at the **org** level (KiwiTon-Tech) with
+     **Contents: Read** on the private deps repos (`KTI-DB` today;
+     extend as needed). Recommended name: `KiwiTon-Tech CI deps reader`.
+  2. Store as the org-level Actions secret `GH_DEPS_TOKEN`.
+  3. The shared workflow `KTI-.github/.github/workflows/python-cpanel.yml`
+     accepts `GH_DEPS_TOKEN` (optional secret) and configures
+     `git config --global url."https://x-access-token:${GH_DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"`
+     before `pip install`. Per-service workflows use `secrets: inherit`
+     so no per-repo plumbing is needed.
+  4. Verify: a CI run on a service that depends on `kti-db` should now
+     reach the deploy step. Watch for `Restart Passenger` in the run log.
+- **Bump `kti-db` version on every DAL change.** Services depend on
+  `kti-db @ git+https://github.com/KiwiTon-Tech/KTI-DB.git@main#subdirectory=python`.
+  pip skips already-satisfied requirements, so without a version bump in
+  `KTI-DB/python/pyproject.toml` the cPanel boxes happily reinstall the
+  same wheel and miss new DAL functions. Minor bump per added function;
+  major bump per breaking change. Rule: if you add a function to
+  `kti_db.dal`, bump the version in the same commit.
 
 ---
 
@@ -688,3 +826,12 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
 - **When to leave shared cPanel?** — Decision point: first time we need
   always-on GPU, a real queue, or SSH ingress. Until then, cPanel + Passenger
   is cheaper and sufficient.
+- **Second broker adapter (crypto.com, IBKR, etc.)?** — Deferred. Sketched
+  in §3.2.1 with the canonical adapter contract, symbol normalisation
+  rules, routing strategy, and required `KTI-DB` migrations. Trigger:
+  any of (a) a strategy needs a coin Alpaca doesn't list, (b) scalping
+  needs deeper books than Alpaca provides, (c) we want
+  perps/leverage/shorts. Until then, all crypto flows through
+  `KTI-Broker-Service` (Alpaca) — adding a second venue before
+  portfolio-level risk controls and kill-switch are battle-tested
+  doubles blast radius for no current upside.
