@@ -1,7 +1,7 @@
 # KiwiTon Investments — Microservices Architecture
 
-> **Status**: In progress (Phase 1b complete)
-> **Last updated**: 2026-05-05
+> **Status**: In progress (Phase 1 complete - Gateway + Broker integration live)
+> **Last updated**: 2026-05-18
 > **Owner**: Zander Bolyanatz
 
 This document describes the target microservices decomposition for the KiwiTon
@@ -36,7 +36,7 @@ shared/infra repos.
 
 | # | Repo | Language | Type | Status |
 |---|------|----------|------|--------|
-| 1 | [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | TS (Next.js) | BFF / API gateway | Pending |
+| 1 | [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | Python (Flask) | BFF / API gateway | ✅ Live at `api.kiwiton-investments.com` (broker integration complete) |
 | 2 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Python (FastAPI) | Alpaca adapter | ✅ Live at `broker.kiwiton-investments.com` |
 | 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | ✅ Live at `market.kiwiton-investments.com` (REST only; WS deferred to Phase 3b) |
 | 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live at `nlp.kiwiton-investments.com` |
@@ -63,8 +63,13 @@ for the playbook.
 ## 3. Service Details
 
 ### 3.1 `KTI-Gateway`
-**Purpose**: The single public entrypoint. Thin Next.js BFF that the frontend
-(`KiwiTon Investment Frontend`) talks to.
+**Purpose**: The single public entrypoint. Thin BFF (Backend-for-Frontend)
+that the frontend (`KiwiTon Investment Frontend`) talks to.
+
+**Tech Stack**: Flask + flask-smorest + Marshmallow + Gunicorn. Originally
+planned as Next.js; pivoted to Flask for consistency with the rest of the
+Python service mesh and to leverage existing team expertise. Auto-generated
+OpenAPI 3.0 docs at `/docs` (Swagger UI).
 
 **Responsibilities**
 - Authentication, session/JWT issuance, CSRF, rate limiting.
@@ -73,12 +78,32 @@ for the playbook.
   market-data + ml-service).
 - No business logic. No direct Alpaca calls. No database writes except for
   auth/session tables.
+- Service health aggregation for frontend status indicators.
+
+**Current State** (as of 2026-05-18): **Phase 1 complete - Live with broker integration.**
+- ✅ Flask app with flask-smorest + auto-generated OpenAPI docs at `/docs`.
+- ✅ Service client library (`app/clients/`) with `BrokerClient` for KTI-Broker-Service.
+- ✅ Broker routes fully integrated:
+  - `GET /broker/balance/` → account info (equity, cash, buying power)
+  - `GET /broker/balance/positions` → all open positions
+  - `GET /broker/balance/positions/<symbol>` → position by symbol
+  - `GET /broker/balance/portfolio/history` → equity curve
+  - `GET /broker/trade/orders` → list orders (with filters)
+  - `POST /broker/trade/orders` → create order
+  - `GET /broker/trade/orders/<id>` → get order by ID
+  - `DELETE /broker/trade/orders/<id>` → cancel order
+- ✅ Service-to-service auth via `X-KTI-Token` header working.
+- ✅ Real-time data from Alpaca via KTI-Broker-Service proxy.
+- ✅ Deployed to production at `https://api.kiwiton-investments.com`.
+- 🟡 Auth routes, contact form, and user routes still return placeholders.
+- 🟡 JWT validation, rate limiting, CSRF protection deferred to Phase 2.
 
 **Pulled from**: `Kiwiton-Investments-Backend/app/api/auth/**`,
 `middleware.ts`, `src/middleware/**`, and thin proxy handlers for everything
 under `app/api/*`.
 
-**Exposes**: HTTPS REST (`/api/...`) to the frontend.
+**Exposes**: HTTPS REST to the frontend. All routes behind `/api` prefix
+(once deployed to cPanel with subdomain routing).
 
 ---
 
@@ -356,53 +381,82 @@ the orchestrator / `KTI-Gateway`.
 **Responsibilities**
 - **Persistent job queue in Postgres.** `backtest_jobs` table (KTI-DB
   migration 006) holds the queue; workers claim rows with `SELECT ...
-  FOR UPDATE SKIP LOCKED`. No Redis dep — we already have Postgres and
-  scale (≤10 concurrent jobs ever) doesn't justify another moving part.
+  FOR UPDATE SKIP LOCKED` (implemented in `app/dal/backtest_jobs.py`
+  ported to psycopg 3 with `Jsonb` adapter). No Redis dep — we already
+  have Postgres and scale (≤10 concurrent jobs ever) doesn't justify
+  another moving part.
 - **Cron-spawned ephemeral workers.** `* * * * * python -m app.worker
   --max-jobs=1 --max-runtime=290` per concurrency slot. Each tick spawns
   a fresh process, claims one job, runs it, exits. Solves the "no
   long-running daemons on shared cPanel" problem we hit in Phase 3b
-  without the keep-alive watchdog tax.
+  without the keep-alive watchdog tax. Worker loop
+  (`app/worker._run_loop`) implements claim→run→persist→exit with
+  cooperative cancel via `cancel_requested` flag checked between
+  Lumibot iterations.
 - **Backtest engine: Lumibot.** Picked over `backtesting.py` because the
   existing prod strategies (`MLTrader`, `CryptoTrader`, `ForexTrader`)
   are already Lumibot `Strategy` subclasses, and Lumibot's
   broker-abstraction lets the same class run live via Alpaca with no
   code change. Cold-start tax (~2–3s of imports per cron tick) is
-  negligible against typical 30s–5min backtest runtimes.
-- **Strategy registry.** Service ships a small in-tree registry for
-  Phase 4b reference strategies; Phase 5 wires real Strategy-Engine
-  strategies in via a `kti-strategies` extras-style package or import
-  paths.
+  negligible against typical 30s–5min backtest runtimes. Engine
+  abstraction (`app/engine/base.py` protocol +
+  `app/engine/lumibot_engine.py` adapter) isolates Lumibot so a future
+  swap to `backtesting.py` or `vectorbt` is a contained change. Yahoo
+  data backend wired for now (zero-cred); Polygon/Alpaca backends
+  deferred.
+- **Strategy registry.** In-tree registry (`app/strategies/registry.py`)
+  with lazy class resolution so chassis tests don't pay Lumibot's import
+  cost. Phase 4b ships one reference strategy (`sma_crossover`); Phase 5
+  wires real Strategy-Engine strategies (`MLTrader`, `CryptoTrader`,
+  `ForexTrader`) in via registry entries pointing at
+  `KiwiTon-Strategy-Engine` import paths.
 - **Concurrency cap.** Hard ceiling of 2 simultaneously-running
   backtests across all workers (per `LIVE_BACKTESTING_SPEC.md` Decision
   5). Cron entries enforce this implicitly (run N parallel workers);
-  API also rejects `POST /run` at the cap to surface a fast 429.
+  API also rejects `POST /backtests` at the cap (via
+  `jobs_dal.count_active()`) to surface a fast 429.
 - **Soft cancel.** `cancel_requested` flag on the job row; worker checks
-  between Lumibot iterations and bails at the next checkpoint.
+  via `jobs_dal.is_cancel_requested()` between Lumibot iterations and
+  raises `CancelledError` at the next checkpoint. Route handler
+  (`POST /backtests/{id}/cancel`) sets the flag; returns `409` on
+  terminal jobs.
 - **Results persistence.** On success, worker writes summary row to
-  `backtest_results` (KTI-DB migration 002) and full result blob to
+  `backtest_results` (KTI-DB migration 002, `app/dal/backtest_results.py`)
+  and full result blob (equity curve + trades + metrics) to
   `backtest_jobs.result` (jsonb). Foreign key links the two so the
   read-only `/backtests` history page picks up completed runs.
 
 **Pulled from**: `Back_Testing/**`, `backtest_runner.py`,
-`KiwiTon-Strategy-Engine/api/routes/backtest_routes.py`,
-`KiwiTon-Strategy-Engine/backend/db/backtest_jobs.py` (DAL — already
-built, needs port to psycopg 3 + FastAPI shapes),
-`app/api/backtests/**`, `src/trading/backtesting/**`,
+`KiwiTon-Strategy-Engine/api/routes/backtest_routes.py` (ported to
+FastAPI in `app/routes/backtests.py`),
+`KiwiTon-Strategy-Engine/backend/db/backtest_jobs.py` (ported to
+psycopg 3 in `app/dal/backtest_jobs.py`),
 `KiwiTon-Strategy-Engine/LIVE_BACKTESTING_SPEC.md` (design doc with all
 Decision 1–8 answers).
 
-**Exposes**: REST
+**Exposes**: REST (all behind `X-KTI-Token` except `/health` and `/ready`)
 - `GET  /health` — liveness probe (public).
-- `GET  /ready` — verifies Postgres + Lumibot import works.
-- `POST /backtests` — enqueue a job; returns `202 Accepted` + `job_id`.
-- `GET  /backtests` — list recent jobs, optional `?status=` filter.
+- `GET  /ready` — verifies `PROD_DATABASE_URI` set + Postgres `SELECT 1`
+  succeeds. Does NOT probe Lumibot import (that's paid once per worker
+  spawn, not per readiness check).
+- `POST /backtests` — enqueue a job; returns `202 Accepted` + job row.
+  Validates strategy exists, asset class supported, date range sane,
+  concurrency cap not hit.
+- `GET  /backtests` — list recent jobs (summary columns only; `result`
+  jsonb omitted), optional `?status=queued|running|completed|error|cancelled`
+  filter.
 - `GET  /backtests/{id}` — full job row including `result` jsonb when
   terminal.
 - `POST /backtests/{id}/cancel` — sets soft-cancel flag; idempotent;
   returns `409` on terminal jobs.
 - `GET  /strategies` — catalogue of registered strategies + default
   params for frontend dropdown.
+
+**Testing**: comprehensive unit + integration coverage. Registry tests
+(no Lumibot import), route tests (DAL mocked), worker tests (engine +
+DAL mocked), integration test scaffold (1-month SPY backtest, skipped by
+default via `pytest -m integration`). All non-integration tests run in
+CI without Lumibot installed.
 
 ---
 
@@ -677,8 +731,8 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
 | 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⏸️ Deferred. Polling `/{bars,quotes,trades}/latest` is sufficient for current strategies; revisit when (a) a strategy's loop is faster than 2s, (b) consumers exceed ~5/symbol and Alpaca rate-limits bite even with caching, or (c) we move off shared cPanel and have somewhere stable to run a long-running daemon. Phase 3b' shipped instead: TTL cache in front of `/latest` endpoints + `kti-marketdata-client` polling SDK so callers don't reinvent backoff/batching. |
 | 4a | **Extract `KTI-ML-Service`** — separates ML train/predict from the strategy engine. | ✅ Live at `ml.kiwiton-investments.com`. End-to-end pipeline confirmed: `/train SPY` (730d bars from market-data + 34 features + walk-forward XGBoost in 38s) → registry → `/predict SPY` returns signal+confidence+version_id. Phase 4b: adaptive thresholds, expected-value gating, scheduled retrain via cron, async `/train` for the full symbol list. |
-| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | 🟡 In flight. **Session 1 done (2026-05-14):** chassis live at `backtest.kiwiton-investments.com`. FastAPI app + Passenger entry + `/health` (200 ok) + `/ready` (reports `db_configured: true` against shared kti-db) + global exception handler. Cron-spawned worker scaffold (`python -m app.worker --check` returns 0 in prod). Pydantic settings tied to cPanel-wide `PROD_DATABASE_URI` + `SHARED_AUTH_TOKEN` convention. CI lint-and-test job green; deploy job blocked on org-secret access (separate fix). 11 chassis tests green locally. KTI-DB migrations 002 (`backtest_results`) + 006 (`backtest_jobs`) already applied. **Session 2 plan:** (a) port `KiwiTon-Strategy-Engine/backend/db/backtest_jobs.py` DAL to psycopg 3, (b) port `api/routes/backtest_routes.py` to FastAPI, (c) add Lumibot + numpy/pandas/ta pins, (d) build `app/engine/{base,lumibot_engine}.py` + in-tree strategy registry (1 reference SMA-crossover strategy), (e) replace worker stub with real claim→run→persist loop respecting `cancel_requested`, (f) end-to-end SPY integration test, (g) register 2 cron entries for the concurrency cap. |
-| 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ⬜ |
+| 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | ✅ Live at `backtest.kiwiton-investments.com`. **Session 1 (2026-05-14):** chassis + health probes + worker scaffold + cPanel deploy. **Session 2 (2026-05-18):** (a) ported `backtest_jobs` + `backtest_results` DAL to psycopg 3 with `Jsonb` adapter + `SELECT ... FOR UPDATE SKIP LOCKED` claim, (b) ported Flask routes to FastAPI (`POST /backtests`, `GET /backtests`, `GET /backtests/{id}`, `POST /backtests/{id}/cancel`, `GET /strategies`) behind `X-KTI-Token`, (c) pinned Lumibot 3.8.16 + pandas/numpy/yfinance in requirements.txt, (d) built engine abstraction (`app/engine/base.py` protocol + `app/engine/lumibot_engine.py` adapter with Yahoo backend), (e) built in-tree strategy registry (`app/strategies/registry.py` with lazy class resolution + `app/strategies/sma_crossover.py` reference strategy), (f) replaced worker stub with real claim→run→persist→exit loop respecting `cancel_requested` + cooperative cancel via `CancelledError`, (g) comprehensive test suites (registry, routes with mocked DAL, worker with mocked engine, integration scaffold skipped by default), (h) improved `/ready` to probe Postgres connectivity. **Deferred to follow-up:** Polygon/Alpaca backends (Yahoo only for now), Forex support (`_pick_backend` rejects `strategy_type='forex'`), real DB integration test (needs CI Postgres service), frontend "Running Backtests" panel (gateway repo). Cron entries for concurrency cap pending ops task. |
+| 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | 🟡 In flight. **Gateway chassis complete (2026-05-18):** Flask + flask-smorest app with OpenAPI docs, route scaffolding for `/health`, `/auth`, `/broker`, `/contact`, `/user`, email utility, Marshmallow schemas, Gunicorn config. All routes return placeholders. **Next:** (a) wire real service integration (proxy calls to `KTI-Broker-Service`, `KTI-Market-Data-Service`, `KTI-ML-Service`, `KTI-News-Sentiment-Service`, `KTI-Backtest-Service`), (b) implement JWT auth + session management, (c) add rate limiting + CSRF protection, (d) deploy to cPanel at `api.kiwiton-investments.com`, (e) add aggregation endpoints for dashboard (account + positions + recent trades + market sentiment + ML signals), (f) add `kti-db` dependency for auth/session tables + trade history reads. Strategy-Engine slimming deferred to Phase 5b. |
 | 6 | **Stand up `KTI-Observability`** — structured logging + Prometheus + Grafana. | ⬜ |
 
 Every phase ends with a working system; nothing is a big-bang migration.
