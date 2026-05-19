@@ -484,3 +484,83 @@ When you need to rotate (annually, or after suspected compromise):
 5. Verify: `~/bin/kti-github-token | head -c 30 && echo "..."`.
 
 The App ID and Installation ID **do not change** during key rotation.
+
+---
+
+## Part D: service-specific notes
+
+### KTI-Strategy-Engine
+
+| Field | Value |
+|-------|-------|
+| Repo | `KiwiTon-Tech/KTI-Strategy-Engine` |
+| Application root | `apps/KTI-Strategy-Engine` |
+| Application URL | `engine.kiwiton-investments.com` |
+| Startup file | `passenger_wsgi.py` |
+| Entry point | `application` |
+| Python version | 3.11 |
+| DNS type | A — **DNS only** (grey cloud) |
+
+**Full per-service setup (Part C) for this service:**
+
+```bash
+SVC=KTI-Strategy-Engine
+
+# C1: Cloudflare DNS — add A record: engine → <server-IP>, DNS only
+# C2: cPanel → Setup Python App → create with values above
+
+# C3: Clone, configure, install
+rm -rf /home/kiwiton/apps/$SVC
+cd /home/kiwiton/apps
+TOKEN=$(~/bin/kti-github-token)
+git clone https://x-access-token:${TOKEN}@github.com/KiwiTon-Tech/$SVC.git
+cd $SVC
+git remote set-url origin https://github.com/KiwiTon-Tech/$SVC.git
+git checkout -- passenger_wsgi.py
+head -5 passenger_wsgi.py   # must show OUR docstring, not "imp.load_source"
+
+cp .env.example .env
+chmod 600 .env
+# Set SHARED_AUTH_TOKEN, TOTAL_CAPITAL, LOG_LEVEL in .env
+
+source /home/kiwiton/virtualenv/apps/$SVC/3.11/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+python passenger_wsgi.py    # should exit silently
+mkdir -p tmp && touch tmp/restart.txt
+```
+
+**C4:** cPanel → SSL/TLS Status → Run AutoSSL for `engine.kiwiton-investments.com`
+
+**C5 Smoke test:**
+
+```bash
+curl https://engine.kiwiton-investments.com/health
+# Expected: {"status":"ok"}
+
+curl https://engine.kiwiton-investments.com/ready
+# Expected: {"status":"ready","orchestrator_initialised":true}
+
+# Authenticated (requires X-KTI-Token header):
+curl -H "X-KTI-Token: <SHARED_AUTH_TOKEN>" https://engine.kiwiton-investments.com/orchestrator/status
+# Expected: {"running":false,"kill_switch_active":false,"strategy_count":0,...}
+```
+
+**C6 Subsequent deploys:**
+
+```bash
+kti-deploy KTI-Strategy-Engine
+```
+
+**`.env` keys required on cPanel:**
+
+```
+SHARED_AUTH_TOKEN=<copy to KTI-Gateway as STRATEGY_ENGINE_SERVICE_TOKEN>
+TOTAL_CAPITAL=100000.0
+ORCHESTRATOR_CONFIG_PATH=   # leave blank to use config/orchestrator.yaml default
+LOG_LEVEL=INFO
+```
+
+> ⚠️ Copy `SHARED_AUTH_TOKEN` from this service's `.env` into the **KTI-Gateway** `.env`
+> as `STRATEGY_ENGINE_SERVICE_TOKEN` so the gateway can authenticate its proxy calls.
