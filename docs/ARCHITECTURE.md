@@ -1,6 +1,6 @@
 # KiwiTon Investments — Microservices Architecture
 
-> **Status**: In progress (Phase 5b complete — KTI-Strategy-Engine live, orchestrator routes wired into Gateway)
+> **Status**: Phase 6 in progress — all 8 services live, structured JSON logging + Prometheus `/metrics` deployed to every service; Grafana Cloud scrape config pending
 > **Last updated**: 2026-05-19
 > **Owner**: Zander Bolyanatz
 
@@ -45,7 +45,7 @@ shared/infra repos.
 | 7 | [`KTI-Strategy-Engine`](https://github.com/KiwiTon-Tech/KTI-Strategy-Engine) | Python (FastAPI) | Strategy orchestrator | ✅ Live at `engine.kiwiton-investments.com` (orchestrator + strategy registry; `/orchestrator/*` + `/strategies/*` proxied via Gateway) |
 | 8 | [`KTI-Backtest-Service`](https://github.com/KiwiTon-Tech/KTI-Backtest-Service) | Python (FastAPI) | Job queue + workers | ✅ Live at `backtest.kiwiton-investments.com` (Lumibot engine, SMA crossover reference strategy, Postgres job queue) |
 | 9 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator)* | Python | Control plane | Optional |
-| 10 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | Python + YAML | Metrics + logging | 🚧 Phase 6 — in progress |
+| 10 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | Python + YAML | Metrics + logging | ✅ Phase 6 — `structlog` + Prometheus `/metrics` deployed to all 8 services; Grafana Cloud dashboard ready to import |
 | 11 | [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | SQL + Python + TS | Central schema + DAL | ✅ Deployed (8 migrations applied) |
 | 12 | [`KTI-Contracts`](https://github.com/KiwiTon-Tech/KTI-Contracts)* | OpenAPI + codegen | Typed cross-service clients | Optional |
 | 13 | [`KTI-.github`](https://github.com/KiwiTon-Tech/KTI-.github) | YAML + MD | Reusable CI workflows + deployment playbook | ✅ Live |
@@ -80,23 +80,114 @@ OpenAPI 3.0 docs at `/docs` (Swagger UI).
   auth/session tables.
 - Service health aggregation for frontend status indicators.
 
-**Current State** (as of 2026-05-18): **Phase 1 complete - Live with broker integration.**
-- ✅ Flask app with flask-smorest + auto-generated OpenAPI docs at `/docs`.
-- ✅ Service client library (`app/clients/`) with `BrokerClient` for KTI-Broker-Service.
-- ✅ Broker routes fully integrated:
-  - `GET /broker/balance/` → account info (equity, cash, buying power)
-  - `GET /broker/balance/positions` → all open positions
-  - `GET /broker/balance/positions/<symbol>` → position by symbol
-  - `GET /broker/balance/portfolio/history` → equity curve
-  - `GET /broker/trade/orders` → list orders (with filters)
-  - `POST /broker/trade/orders` → create order
-  - `GET /broker/trade/orders/<id>` → get order by ID
-  - `DELETE /broker/trade/orders/<id>` → cancel order
-- ✅ Service-to-service auth via `X-KTI-Token` header working.
-- ✅ Real-time data from Alpaca via KTI-Broker-Service proxy.
-- ✅ Deployed to production at `https://api.kiwiton-investments.com`.
-- 🟡 Auth routes, contact form, and user routes still return placeholders.
-- 🟡 JWT validation, rate limiting, CSRF protection deferred to Phase 2.
+**Current State** (as of 2026-05-19): **Gateway Route Expansion Sprint complete — all active frontend pages wired.**
+
+#### Part 1 — Routes wired (this sprint)
+
+**Broker** (`/broker/*` → `KTI-Broker-Service`)
+- `GET    /broker/balance/` — account info
+- `GET    /broker/balance/positions` — all open positions
+- `GET    /broker/balance/positions/<symbol>` — position by symbol
+- `DELETE /broker/balance/positions/<symbol>` — close one position
+- `DELETE /broker/balance/positions` — close all positions
+- `GET    /broker/balance/portfolio/history` — equity curve
+- `GET    /broker/trade/orders` — list orders
+- `POST   /broker/trade/orders` — create order
+- `GET    /broker/trade/orders/<id>` — order detail
+- `DELETE /broker/trade/orders/<id>` — cancel one order
+- `DELETE /broker/trade/orders` — cancel all open orders
+- `GET    /broker/trade/orders/by-client-id` — order lookup by `client_order_id`
+- `GET    /broker/clock/` — trading clock (is_open, next open/close)
+- `GET    /broker/clock/calendar` — market calendar
+- `GET    /broker/activities/` — account activities (fills, dividends, fees)
+- `GET    /broker/watchlists/` — list watchlists
+- `POST   /broker/watchlists/` — create watchlist
+- `GET    /broker/watchlists/<id>` — get watchlist
+- `PUT    /broker/watchlists/<id>` — update watchlist
+- `DELETE /broker/watchlists/<id>` — delete watchlist
+- `POST   /broker/watchlists/<id>/assets` — add asset to watchlist
+- `DELETE /broker/watchlists/<id>/assets` — remove asset from watchlist
+- `GET    /broker/assets/` — list tradable assets
+- `GET    /broker/assets/<symbol_or_id>` — asset reference data
+
+**Market Data** (`/market/*` → `KTI-Market-Data-Service`)
+- `GET /market/bars/` — historical OHLCV bars (stocks + crypto)
+- `GET /market/bars/latest` — latest bar per symbol
+- `GET /market/quotes/latest` — latest bid/ask per symbol
+- `GET /market/trades/latest` — latest trade per symbol
+- `GET /market/snapshots/` — full snapshot per symbol
+- `GET /market/news/` — Alpaca news feed
+- `GET /market/crypto/bars` — historical bars for crypto pairs
+- `GET /market/crypto/bars/latest` — latest bar for crypto pairs
+- `GET /market/crypto/quotes/latest` — latest quote for crypto pairs
+- `GET /market/crypto/snapshots` — snapshot for crypto pairs
+- `GET /market/screener/most-actives` — most-active US equities by volume/trades
+- `GET /market/screener/movers` — top gaining/losing US equities
+
+**Backtest** (`/backtest/*` → `KTI-Backtest-Service`)
+- `GET  /backtest/jobs/` — list jobs
+- `POST /backtest/jobs/` — submit job
+- `GET  /backtest/jobs/<id>` — job detail + results
+- `POST /backtest/jobs/<id>/cancel` — soft cancel
+- `GET  /backtest/strategies/` — strategy catalogue
+- `GET  /backtest/jobs/summary` — aggregate stats by strategy/symbol
+- `GET  /backtest/jobs/<id>/equity-curve` — extract equity curve from completed job
+
+**DB-backed** (`/trades/*`, `/portfolio/*` → `kti_db` DAL direct)
+- `GET /trades/` — trade history with filters
+- `GET /trades/<id>` — single trade
+- `GET /trades/summary` — aggregate P&L, win rate, avg return
+- `GET /portfolio/summary` — portfolio-level summary
+- `GET /portfolio/positions` — DB-persisted positions
+- `GET /portfolio/allocations` — target allocations
+- `GET /portfolio/snapshots` — daily equity snapshots
+- `GET /portfolio/rebalances` — rebalance event log
+- `GET /portfolio/constraints` — risk constraints
+
+**Dashboard / Orchestrator** (unchanged)
+- `GET /dashboard/` — parallel-aggregated: account + positions + orders + sentiment + orchestrator + service health
+- `GET /orchestrator/status`, `POST /orchestrator/start`, `POST /orchestrator/stop`, `POST /orchestrator/kill-switch`, `PUT /orchestrator/capital`
+
+**Service-to-service infrastructure**
+- `ServiceClient.base` now has `put()` method; `delete()` accepts `params`.
+- `BrokerClient` extended with all new method stubs.
+- `MarketDataClient` extended with `get_most_actives()`, `get_movers()`, crypto variants.
+- `kti-db` (`psycopg`, `psycopg-pool`) added to `KTI-Gateway/requirements.txt`.
+
+**Frontend `api.js` URL corrections** — 22 endpoints updated from dead `/api/...` legacy
+paths to real Gateway paths.
+
+#### Part 2 — Deferred Gateway Routes (next sprint)
+
+These frontend API objects have no backing Gateway route yet. The pages that call them
+return errors but the core dashboard/trading/broker flow is unaffected.
+
+| Frontend API | Endpoint pattern | Backing needed | Priority |
+|---|---|---|---|
+| `performanceApi` | `/api/performance/*` | New DB-backed routes (equity curve, drawdowns, monthly returns derived from trades + portfolio tables) | High — `/performance` page broken |
+| `statementsApi.generate` | `/api/statements` | Map to `/broker/activities/` (already exists) or custom P&L roll-up | High — `/statements` page broken |
+| `monitoringApi` | `/api/monitoring/*` | Proxy `/health/` aggregation + Gateway internal alerts | High — `/monitoring` page broken |
+| `alertsApi` | `/api/alerts/*` | New DB CRUD routes (needs `alerts` table in KTI-DB) | High — `/alerts` page broken |
+| `tradingStatusApi` | `/api/trading/status`, `/api/trading/config` | Proxy to `/orchestrator/status` + new config table | High — `/risk` page broken |
+| `profilesApi` | `/api/trading/profiles` | New DB CRUD (strategy profile table in KTI-DB) | High — `/risk` page broken |
+| `costsApi` | `/api/costs/*` | DB-backed: `transaction_costs` table (migration 004) | Medium — no active page yet |
+| `forexApi` | `/api/market/forex/*` | Extend `KTI-Market-Data-Service` with OANDA/TwelveData adapter | Medium — no `/forex` page |
+| `optionsApi` | `/api/market/options/*` | Alpaca `OptionHistoricalDataClient` in Market Data Service | Medium — no `/options` page |
+| `logosApi` | `/api/market/logos/*` | Third-party logo API (Clearbit, Polygon) — cosmetic | Low |
+| `cryptoApi.getTrades` | `/api/market/crypto/trades` | Add `GET /market/crypto/trades/latest` route | Low |
+| `cryptoApi.getOrderbook` | `/api/market/crypto/orderbook` | Alpaca orderbook endpoint in Market Data Service | Low |
+| `backtestApi.bySymbol` | `/api/backtests/by-symbol` | Use `/backtest/jobs/summary?symbol=` instead | Low |
+| `accountApi.getConfig/updateConfig` | `/api/account/config` | New account config table or orchestrator config endpoint | Low |
+
+**DB migrations required for Part 2 high-priority items:**
+- `alerts` table: `id`, `name`, `condition`, `symbol`, `enabled`, `created_at`
+- `strategy_profiles` table: `name`, `config jsonb`, `is_active`
+- `trading_config` table: `key`, `value jsonb`, `updated_at`
+
+**Decisions before building Part 2:**
+1. `performanceApi` — derive from existing `trades` + `portfolio_snapshots` tables, or keep separate `performance_metrics` table? (Recommendation: derive; avoids write-side changes.)
+2. `tradingStatusApi.getConfig/updateConfig` — is this a Strategy Engine concern or a Gateway/DB concern? (Recommendation: proxy to `/orchestrator/status` for reads; add a `trading_config` table for writes.)
+3. `monitoringApi.getAlerts/sendAlert` — is this internal alerting or user-facing notifications? Clarify before building the alerts table.
 
 **Pulled from**: `Kiwiton-Investments-Backend/app/api/auth/**`,
 `middleware.ts`, `src/middleware/**`, and thin proxy handlers for everything
@@ -247,8 +338,9 @@ staking, derivatives. Spot trading + read endpoints only.
 across asset classes (stocks, crypto, forex, options).
 
 **Responsibilities**
-- REST: bars, quotes, trades, snapshots, news, options chains, screener,
-  logos, corporate actions.
+- REST: bars, quotes, trades, snapshots, news, stock screener (most-actives,
+  top-movers), crypto sub-routes, options chains (deferred), logos (deferred),
+  corporate actions (deferred).
 - WebSocket: live price/quote/trade streams for stocks + crypto + news.
 - Provider adapters (Alpaca today, OANDA/TwelveData for forex tomorrow).
 - Caching layer (Redis) for frequently-hit endpoints.
@@ -728,12 +820,13 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 1 | **Extract `KTI-NLP-Service`** — FinBERT over FastAPI, zero shared state. | ✅ Live at `nlp.kiwiton-investments.com` |
 | 1b | **Extract `KTI-News-Sentiment-Service`** — RSS scrape + NLP call + KTI-DB persistence. Drop tkinter/selenium/alpaca. | ✅ Live at `news.kiwiton-investments.com`; 88 articles scored in first run |
 | 2 | **Extract `KTI-Broker-Service`** — biggest DRY win; kills the Python/TS Alpaca duplication. | ✅ Live at `broker.kiwiton-investments.com` (account, orders w/ idempotency, positions, clock, calendar, portfolio history, watchlists, assets, statements via direct REST bypass for `/v2/account/activities`) |
-| 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto) |
+| 3a | **Extract `KTI-Market-Data-Service`** (REST) — frontend + strategies share one feed. | ✅ Live at `market.kiwiton-investments.com` (`/bars`, `/bars/latest`, `/quotes/latest`, `/trades/latest`, `/snapshots`, `/news`; stocks + crypto). **Route Expansion Sprint added:** `/screener/most-actives`, `/screener/movers`; crypto sub-routes (`/bars`, `/bars/latest`, `/quotes/latest`, `/snapshots`) proxied via Gateway `/market/crypto/*`. |
 | 3b | **`KTI-Market-Data-Service` WebSocket fan-out** — separate cPanel daemon re-broadcasting `alpaca.data.live.{Stock,Crypto}DataStream` to internal subscribers (Redis pub/sub once available). Passenger doesn't speak WS, so this can't run inside the FastAPI app. | ⏸️ Deferred. Polling `/{bars,quotes,trades}/latest` is sufficient for current strategies; revisit when (a) a strategy's loop is faster than 2s, (b) consumers exceed ~5/symbol and Alpaca rate-limits bite even with caching, or (c) we move off shared cPanel and have somewhere stable to run a long-running daemon. Phase 3b' shipped instead: TTL cache in front of `/latest` endpoints + `kti-marketdata-client` polling SDK so callers don't reinvent backoff/batching. |
 | 4a | **Extract `KTI-ML-Service`** — separates ML train/predict from the strategy engine. | ✅ Live at `ml.kiwiton-investments.com`. End-to-end pipeline confirmed: `/train SPY` (730d bars from market-data + 34 features + walk-forward XGBoost in 38s) → registry → `/predict SPY` returns signal+confidence+version_id. Phase 4b: adaptive thresholds, expected-value gating, scheduled retrain via cron, async `/train` for the full symbol list. |
 | 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | ✅ Live at `backtest.kiwiton-investments.com`. **Session 1 (2026-05-14):** chassis + health probes + worker scaffold + cPanel deploy. **Session 2 (2026-05-18):** (a) ported `backtest_jobs` + `backtest_results` DAL to psycopg 3 with `Jsonb` adapter + `SELECT ... FOR UPDATE SKIP LOCKED` claim, (b) ported Flask routes to FastAPI (`POST /backtests`, `GET /backtests`, `GET /backtests/{id}`, `POST /backtests/{id}/cancel`, `GET /strategies`) behind `X-KTI-Token`, (c) pinned Lumibot 3.8.16 + pandas/numpy/yfinance in requirements.txt, (d) built engine abstraction (`app/engine/base.py` protocol + `app/engine/lumibot_engine.py` adapter with Yahoo backend), (e) built in-tree strategy registry (`app/strategies/registry.py` with lazy class resolution + `app/strategies/sma_crossover.py` reference strategy), (f) replaced worker stub with real claim→run→persist→exit loop respecting `cancel_requested` + cooperative cancel via `CancelledError`, (g) comprehensive test suites (registry, routes with mocked DAL, worker with mocked engine, integration scaffold skipped by default), (h) improved `/ready` to probe Postgres connectivity. **Deferred to follow-up:** Polygon/Alpaca backends (Yahoo only for now), Forex support (`_pick_backend` rejects `strategy_type='forex'`), real DB integration test (needs CI Postgres service), frontend "Running Backtests" panel (gateway repo). Cron entries for concurrency cap pending ops task. |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ✅ **Phase 5b complete (2026-05-19).** Gateway fully wired: all nine services proxied. `KTI-Strategy-Engine` live at `engine.kiwiton-investments.com` (FastAPI + a2wsgi + Passenger). `StrategyEngineClient` + `/orchestrator/*` + `/strategies/*` proxy routes added to Gateway. Frontend `orchestratorApi` updated to use gateway paths. Ruff lint clean. `kti-deploy` alias installed on cPanel. End-to-end smoke test passing: `GET /orchestrator/status` → `{running:false, total_capital:100000, kill_switch_active:false}`. |
-| 6 | **Stand up `KTI-Observability`** — structured JSON logging + Prometheus `/metrics` on all services + Grafana Cloud dashboards + Alertmanager. | 🚧 In progress |
+| 5c | **Gateway Route Expansion Sprint** — wire all active frontend pages to real Gateway endpoints; document Part 2 deferred routes. | ✅ **Complete (2026-05-19).** 50+ new routes added across broker, market-data, backtest, and DB-backed layers. 22 dead `/api/...` paths fixed in `api.js`. DB-backed `/trades/*` + `/portfolio/*` routes wired directly to `kti_db` DAL. Screener + crypto sub-routes added to Market Data Service and Gateway. See §3.1 Part 1/Part 2 for full inventory. |
+| 6 | **Stand up `KTI-Observability`** — structured JSON logging + Prometheus `/metrics` on all services + Grafana Cloud dashboards + Alertmanager. | 🚧 In progress — `structlog` (`app/logging_config.py`) + `prometheus-fastapi-instrumentator` / `prometheus-flask-exporter` deployed to all 8 services (2026-05-19). Grafana Cloud stack created (`kti.grafana.net`). Prometheus scrape config + dashboard import (`kti-services-overview.json`) pending. UptimeRobot monitors pending. |
 
 Every phase ends with a working system; nothing is a big-bang migration.
 
