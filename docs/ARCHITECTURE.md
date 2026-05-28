@@ -910,8 +910,10 @@ a time. ✅ = done, 🚧 = in progress, ⬜ = pending.
 | 4b | **Extract `KTI-Backtest-Service`** — queue + workers for historical simulations. | ✅ Live at `backtest.kiwiton-investments.com`. **Session 1 (2026-05-14):** chassis + health probes + worker scaffold + cPanel deploy. **Session 2 (2026-05-18):** (a) ported `backtest_jobs` + `backtest_results` DAL to psycopg 3 with `Jsonb` adapter + `SELECT ... FOR UPDATE SKIP LOCKED` claim, (b) ported Flask routes to FastAPI (`POST /backtests`, `GET /backtests`, `GET /backtests/{id}`, `POST /backtests/{id}/cancel`, `GET /strategies`) behind `X-KTI-Token`, (c) pinned Lumibot 3.8.16 + pandas/numpy/yfinance in requirements.txt, (d) built engine abstraction (`app/engine/base.py` protocol + `app/engine/lumibot_engine.py` adapter with Yahoo backend), (e) built in-tree strategy registry (`app/strategies/registry.py` with lazy class resolution + `app/strategies/sma_crossover.py` reference strategy), (f) replaced worker stub with real claim→run→persist→exit loop respecting `cancel_requested` + cooperative cancel via `CancelledError`, (g) comprehensive test suites (registry, routes with mocked DAL, worker with mocked engine, integration scaffold skipped by default), (h) improved `/ready` to probe Postgres connectivity. **Deferred to follow-up:** Polygon/Alpaca backends (Yahoo only for now), Forex support (`_pick_backend` rejects `strategy_type='forex'`), real DB integration test (needs CI Postgres service), frontend "Running Backtests" panel (gateway repo). Cron entries for concurrency cap pending ops task. |
 | 5 | **Slim `KTI-Strategy-Engine`** down to strategies + orchestrator. Slim `Kiwiton-Investments-Backend` into `KTI-Gateway`. | ✅ **Phase 5b complete (2026-05-19).** Gateway fully wired: all nine services proxied. `KTI-Strategy-Engine` live at `engine.kiwiton-investments.com` (FastAPI + a2wsgi + Passenger). `StrategyEngineClient` + `/orchestrator/*` + `/strategies/*` proxy routes added to Gateway. Frontend `orchestratorApi` updated to use gateway paths. Ruff lint clean. `kti-deploy` alias installed on cPanel. End-to-end smoke test passing: `GET /orchestrator/status` → `{running:false, total_capital:100000, kill_switch_active:false}`. |
 | 5c | **Gateway Route Expansion Sprint** — wire all active frontend pages to real Gateway endpoints; document Part 2 deferred routes. | ✅ **Complete (2026-05-19).** 50+ new routes added across broker, market-data, backtest, and DB-backed layers. 22 dead `/api/...` paths fixed in `api.js`. DB-backed `/trades/*` + `/portfolio/*` routes wired directly to `kti_db` DAL. Screener + crypto sub-routes added to Market Data Service and Gateway. See §3.1 Part 1/Part 2 for full inventory. |
-| 5d | **Frontend ↔ Gateway Full Wiring (Phases A/B/C)** — implement all `/api/*` routes deferred in 5c; wire every `api.js` client object to a live endpoint. | ✅ **Complete (2026-05-24).** **Phase A** (5 broken pages fixed): `performanceApi`, `monitoringApi`, `alertsApi`, `statementsApi`, `tradingStatusApi`/`profilesApi` — new `/api/performance/*`, `/api/monitoring/*`, `/api/alerts/*`, `/api/statements`, `/api/trading/*` blueprints + matching DAL modules + DB migration 009. **Phase B** (write endpoints): `PATCH /trades/:id` for journal notes (migration 010), `POST /api/portfolio/allocations|positions`, `/api/costs/*`, `GET /api/backtests/by-symbol`. `tradeJournalApi` added to `api.js`; `journal/page.js` `handleSave` replaced. **Phase C** (market data extensions): `AlpacaDataClient` extended with 15 new methods; `routes/historical.py` + `routes/options.py` added to `KTI-Market-Data-Service`; crypto trades + orderbook added to trades router; Gateway blueprints `api/market.py` (logos/forex/fixed-income), `api/account.py` (config + SSE events stream), `api/positions.py` (exercise/do-not-exercise), `market_data/market_historical.py`, `market_data/market_options.py`. Only remaining unimplemented stub: `POST /api/trading/execute`. See `KiwiTon Investment Frontend/WIRING_AUDIT.md` for full inventory. |
-| 6 | **Stand up `KTI-Observability`** — structured JSON logging + Prometheus `/metrics` on all services + Grafana Cloud dashboards + Alertmanager. | 🚧 In progress — `structlog` (`app/logging_config.py`) + `prometheus-fastapi-instrumentator` / `prometheus-flask-exporter` deployed to all 8 services (2026-05-19). Grafana Cloud stack created (`kti.grafana.net`). Prometheus scrape config + dashboard import (`kti-services-overview.json`) pending. UptimeRobot monitors pending. |
+| 5d | **Frontend ↔ Gateway Full Wiring (Phases A/B/C)** — implement all `/api/*` routes deferred in 5c; wire every `api.js` client object to a live endpoint. | ✅ **Complete (2026-05-26).** **Phase A** (5 broken pages fixed): `performanceApi`, `monitoringApi`, `alertsApi`, `statementsApi`, `tradingStatusApi`/`profilesApi` — new `/api/performance/*`, `/api/monitoring/*`, `/api/alerts/*`, `/api/statements`, `/api/trading/*` blueprints + matching DAL modules + DB migration 009. **Phase B** (write endpoints): `PATCH /trades/:id` for journal notes (migration 010), `POST /api/portfolio/allocations|positions`, `/api/costs/*`, `GET /api/backtests/by-symbol`. `tradeJournalApi` added to `api.js`; `journal/page.js` `handleSave` replaced. **Phase C** (market data extensions + new pages): `AlpacaDataClient` extended with 15 new methods; `routes/historical.py` + `routes/options.py` added to `KTI-Market-Data-Service`; crypto trades + orderbook added to trades router; Gateway blueprints `api/market.py` (logos/forex/fixed-income), `api/account.py` (config + SSE events stream), `api/positions.py` (exercise/do-not-exercise), `market_data/market_historical.py`, `market_data/market_options.py`. **New frontend pages**: `/options` (chain explorer with ITM/OTM indicators), `/forex` (live rates + converter using open.er-api.com), `/monitoring` (enhanced with 8-service microservices grid), `<ActivityFeed>` component (SSE live event stream for fills/dividends). **Database indexes**: `KTI-DB/docs/RECOMMENDED_INDEXES.md` created with 13 high/medium priority indexes for Phase A/B/C query optimization. Only remaining unimplemented stub: `POST /api/trading/execute`. Frontend commit `f02fb637e`, KTI-DB commit `83d739a`. |
+| 6 | **Stand up `KTI-Observability`** — structured JSON logging + Prometheus `/metrics` on all services + Grafana Cloud dashboards + Alertmanager. | 🚧 In progress — `structlog` (`app/logging_config.py`) + `prometheus-fastapi-instrumentator` / `prometheus-flask-exporter` deployed to all 8 services (2026-05-19). Grafana Cloud stack created (`kti.grafana.net`). Prometheus scrape config + dashboard import (`kti-services-overview.json`) pending. **UptimeRobot monitors ✅ live**. |
+| 7 | **Frontend UX Modernization** — component library, state management, real-time layer, AI/ML surfaces. See [Phase 7 Frontend Plan](#10-phase-7--frontend-ux-modernization) below. | ⬜ Planned — 8 sprints covering architectural foundations (shadcn/ui, TanStack Query, Zustand), day-trading features (command palette, trade ticket, watchlist), AI differentiation (trade ideas feed, ML reasoning panel, co-pilot chat), and polish (settings, onboarding, mobile). |
+| 8 | **Critical Backend Infrastructure** — live order execution, real strategy backtesting, WebSocket streaming, ML artifact storage. See [Phase 7 Implementation Plan](./PHASE_7_IMPLEMENTATION_PLAN.md). | ⬜ Planned — 4 workstreams: (A) `POST /api/trading/execute` with 6-layer safety stack, (B) wire MLTrader/CryptoTrader/ForexTrader into backtest registry + Polygon backend, (C) Redis Pub/Sub + WebSocket price streaming, (D) Cloudflare R2 for ML models. |
 
 Every phase ends with a working system; nothing is a big-bang migration.
 
@@ -1139,3 +1141,422 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
   `KTI-Broker-Service` (Alpaca) — adding a second venue before
   portfolio-level risk controls and kill-switch are battle-tested
   doubles blast radius for no current upside.
+
+---
+
+## 10. Phase 7 — Frontend UX Modernization
+
+**Status**: Planned (2026-05-28)  
+**Repo**: `KiwiTon Investment Frontend`  
+**Goal**: Transform the frontend from functional MVP into a production-grade day-trading platform with AI/ML differentiation.
+
+### 10.1 Problem Statement
+
+Current state (as of Phase 6):
+- ✅ All backend services live and wired
+- ✅ Every `api.js` endpoint has a real Gateway route
+- ✅ 24 pages, ~13K LOC, functional but not polished
+- ❌ **UX debt**: every page hand-rolls buttons, cards, modals, tables, loading states
+- ❌ **No component library**: `components/ui/` only has `PullToRefresh.js`
+- ❌ **No state management**: `useApiData` hook rebuilds cache/refetch logic per page
+- ❌ **Chart library bloat**: ships `recharts` + `apexcharts` + `chart.js` (~600KB overlap)
+- ❌ **Polling-only**: 1.5s cadence unusable for day trading (scalping needs <100ms)
+- ❌ **ML/AI underutilized**: heavy backend investment (ML Service, Sentiment, NLP) barely surfaced in UI
+
+**For a day-trading platform competing on AI/ML, this is the biggest gap.**
+
+### 10.2 Architectural Foundations (Sprint 1 — Required First)
+
+These aren't "features" — they're the substrate that makes every subsequent feature 10× faster to ship.
+
+#### 10.2.1 Component Library (`src/components/ui/*`)
+
+**Install**: `shadcn/ui` (Radix primitives + Tailwind, zero runtime cost)
+
+**Core primitives**:
+- `Button`, `IconButton`, `ButtonGroup` — `variant` prop (`primary | secondary | ghost | danger | success`)
+- `Card`, `CardHeader`, `CardBody`, `CardFooter`
+- `Modal`, `Dialog`, `Drawer`, `Sheet` — replaces every ad-hoc `fixed inset-0` modal
+- `Tabs`, `Pill`, `Badge`, `StatusDot`
+- `Table` — sticky header, sortable columns, row virtualization (`@tanstack/react-table` + `react-virtuoso`)
+- `Input`, `NumberInput`, `Select`, `Combobox`, `Slider`, `Toggle`, `RadioGroup`
+- `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`
+- `Skeleton` — shimmer placeholders
+- `Toast` — wire `sonner` (already installed but unused) into global `<Toaster />`
+- `EmptyState`, `ErrorState`, `LoadingState` — currently inlined dozens of times
+
+**Trading-specific primitives**:
+- `Sparkline` — tiny inline chart for ticker rows
+- `PriceCell` — animated up/down flash on price update
+- `PnLBadge` — auto color + sign + percent
+- `SignalChip` — buy/sell/hold with confidence ring
+- `ConfidenceBar` — already in `models/page.js`, promote to reusable
+- `SymbolBadge`, `AssetClassPill`
+
+#### 10.2.2 State Management with TanStack Query
+
+**Replace**: `useApiData` hook with `@tanstack/react-query`
+
+**Benefits**:
+- Automatic cache + request deduplication (dashboard's 5 parallel calls → 1)
+- `refetchInterval` for polling (sub-second for prices)
+- `staleTime` / `gcTime` per endpoint
+- Optimistic updates for journal edits, alert toggles
+- Mutations with rollback
+- DevTools panel for debugging
+
+**Migration**: Wrap existing `apiClient` in typed `queryFns`, migrate callers in batches.
+
+#### 10.2.3 Chart Library Consolidation
+
+**Current**: `recharts` + `apexcharts` + `chart.js` + `react-chartjs-2` + `react-apexcharts` (~600KB gzip)
+
+**Target**:
+- **`recharts`** — analytics dashboards (P&L, equity curves, distributions)
+- **`lightweight-charts`** (TradingView, ~40KB) — candlestick/intraday for day trading
+- **Drop**: `chart.js`, `apexcharts`, `react-chartjs-2`, `react-apexcharts`
+
+#### 10.2.4 Real-Time WebSocket Layer
+
+**Frontend scaffolding** (independent of backend Phase 8C timing):
+- `lib/realtime.js` — `RealtimeClient` class wrapping `socket.io-client` (already installed)
+- `useRealtimePrice(symbol)` hook — falls back to polling if WS unavailable
+- Channels: `prices.{symbol}`, `orders.fills`, `alerts.fired`, `orchestrator.status`
+- Connection-state indicator in navbar (green/amber/red dot, Bloomberg-style)
+
+When backend ships WebSocket (Phase 8C), frontend lights up with no refactor.
+
+#### 10.2.5 Global State with Zustand
+
+Lightweight (~1KB), no boilerplate. Slices:
+- `useUserStore` — auth, theme, prefs
+- `useWatchlistStore` — user-managed multi-watchlists with localStorage persistence
+- `useLayoutStore` — saved dashboard layouts
+- `useTradingStore` — selected symbol, order ticket state, paper/live mode
+
+#### 10.2.6 Error Boundaries + Suspense
+
+- `<ErrorBoundary>` per page-section (prevents one crashed widget from blanking whole page)
+- Pair with `<Suspense fallback={<Skeleton />}>`
+- Would have prevented the `e.price.toFixed` whitepage (2026-05-28)
+
+---
+
+### 10.3 Day-Trading Power Features (Sprints 2–4)
+
+#### 10.3.1 Command Palette (`Cmd/Ctrl + K`) — Sprint 2
+
+**Component**: `<CommandPalette>` indexing symbols, pages, strategies, alerts, recent trades, ML models.
+
+**Quick actions**:
+- "Buy 100 AAPL market"
+- "Show AAPL chart"
+- "Toggle kill switch"
+- "Run backtest MLTrader on TSLA last 30d"
+
+Pro traders live in this.
+
+#### 10.3.2 Universal Trade Ticket (Slide-over Drawer) — Sprint 3
+
+**Component**: `<TradeTicket symbol={...} side={...} />` accessible from any page (ticker card, position row, signal row, search result).
+
+**Features**:
+- Side toggle (Buy/Sell), order type (Market/Limit/Stop/Bracket)
+- Quantity OR notional OR % of buying power
+- Live preview: estimated fill, fees (from `transaction_costs` table), buying power impact
+- **AI assist**: shows current ML signal + sentiment + regime → recommends position size based on confidence
+- **Risk preflight**: warns on overconcentration, drawdown threshold, kill-switch state
+- Paper-vs-Live indicator front-and-center (red banner if live)
+- Hotkeys: `B` Buy, `S` Sell, `Esc` close
+
+#### 10.3.3 Multi-Pane Watchlist Workspace — Sprint 3
+
+**Rebuild**: `/market-search` as persistent customizable watchlist instead of hardcoded symbol lists.
+
+**Features**:
+- User-created watchlists (Tech, Crypto, Earnings This Week, Custom)
+- Drag-to-reorder, multi-column sort, density toggle
+- Inline sparkline (5-day, 1-day, intraday)
+- Live `PriceCell` flash on tick
+- One-click "Open ticket" / "Add alert" / "Open chart" per row
+- Right-click `<ContextMenu>`
+- Saved per-user via Zustand + localStorage; sync to backend later
+
+#### 10.3.4 Pro Charting on `/symbol` — Sprint 4
+
+**Replace** current chart with **TradingView `lightweight-charts`**:
+- Candlestick + volume + ML overlay (entry/exit markers from `trade_signals`)
+- Multi-timeframe quick-switch (1m/5m/15m/1h/1D)
+- Drawing tools (trendlines, fibs, horizontal levels) — saved per-symbol per-user
+- Indicator stack: SMA/EMA/RSI/MACD/Bollinger (matches `KTI-ML-Service` features)
+- **Overlay sentiment ribbon**: green/red intensity bar for `news_daily_summaries.weighted_score`
+- **ML signal markers**: arrow on each historical prediction with confidence; click to expand reasoning
+
+#### 10.3.5 Heatmap Component — Sprint 4
+
+**Reusable**: `<HeatMap>` using `recharts.Treemap` or custom SVG.
+
+**Variants**:
+- Portfolio heatmap (positions sized by weight, colored by today's P&L)
+- Sector heatmap (S&P sectors → individual stocks; uses existing `sp500.js`)
+- Strategy heatmap (which strategies winning/losing)
+- Crypto heatmap (top 50 by market cap)
+
+Surface on dashboard, portfolio, market-search.
+
+#### 10.3.6 Live P&L Ribbon — Sprint 2
+
+**Sticky bar** above page content (toggleable):
+- Total equity, day P&L $/%, open positions P&L
+- Pulses green/red on tick
+- Click → `/positions`
+- Hidden when offline / disabled in settings
+
+#### 10.3.7 Notifications Center (Bell in Navbar) — Sprint 2
+
+**Single source** for all events. Replaces per-page alert lists.
+
+**Events**:
+- Order fills, alert triggers, kill-switch fired, model retrain complete, backtest done, daily P&L summary
+- Filtering, mark-as-read, click → relevant page
+- Push via WS channel + degrades to polling
+
+---
+
+### 10.4 AI/ML Differentiation (Sprints 5–6 — Where You Win)
+
+Heavy backend investment (ML Service, Sentiment, NLP). Frontend barely surfaces it. **This is the biggest competitive gap.**
+
+#### 10.4.1 "AI Trade Ideas" Feed — Sprint 5 ⭐ **Killer Feature**
+
+**New page**: `/ideas` or dashboard widget.
+
+**Content**: Daily ranked list of trade candidates:
+- Symbol, signal, confidence, expected value, time horizon
+- **"Why" card**: 3-bullet plain-English reasoning derived from feature importance + sentiment + regime + ML model output
+  - Example: *"AAPL Buy — 78% confidence. Drivers: RSI oversold (35), positive sentiment (+0.42, 18 articles), trending regime, MLTrader v3 historical accuracy on similar setups: 64%."*
+- One-click "Open ticket" with size pre-filled by Kelly fraction × confidence
+- Track CTR + post-trade outcome → feed back to retraining (closes the loop)
+
+#### 10.4.2 ML Reasoning Panel — Sprint 5
+
+**Reusable**: `<ReasoningPanel signalId={...}>`
+
+**Content**:
+- Top features ranked (already partially in `/models`)
+- **SHAP-style waterfall**: how each feature pushed prediction toward buy/sell
+- Sentiment tape: latest 5 articles with score
+- Regime context
+- Similar historical setups with outcomes (kNN over feature space — backend addition needed)
+
+**Show in**:
+- `/signals` row expansion
+- `/trades` row drill-down
+- `/positions` "Why am I in this?" link
+
+#### 10.4.3 AI Co-Pilot Chat (Sidebar Drawer) — Sprint 6 ⭐ **Wow Factor**
+
+**Right-edge slide-out** with chat:
+- "Show me oversold tech with positive sentiment"
+- "Analyze my AAPL position"
+- "What's the best strategy backtested on TSLA last quarter?"
+- "Why did MLTrader buy NVDA today?"
+
+**Implementation**: Thin LLM router (OpenAI/Anthropic function-calling) translating natural language → API calls already exposed (`/api/ml/predictions`, `/sentiment/aggregate`, `/backtest/jobs`, etc.) and rendering results inline.
+
+**Not a replacement for UI** — augments it.
+
+**Scope**: v1 (read-only queries) → v2 (ticket pre-fill) → v3 (auto-execute with confirmation).
+
+#### 10.4.4 Strategy Comparison Lab — Sprint 5
+
+**Revamp**: `/backtests/page.js` (currently 1,817 lines — maintenance ship-stopper).
+
+**Break into**:
+- `<BacktestForm>` — symbol, date range, strategy multi-select
+- `<BacktestResultCard>` — collapsible per-run
+- `<ComparisonChart>` — overlay equity curves of N strategies
+- `<MetricsGrid>` — Sharpe, drawdown, win-rate side-by-side
+- `<TradeListTable>` — virtualized, filterable
+
+**Add**: head-to-head (pick 2 strategies → see diff in trades + outcomes).
+
+#### 10.4.5 Confidence Calibration Widget — Sprint 5
+
+**Pro ML feature**. Plot predicted confidence vs realized win-rate:
+- Perfect diagonal = well-calibrated
+- Below diagonal = overconfident (warning)
+- Above diagonal = underconfident
+
+**Place on**: `/models` per-model. Reusable `<CalibrationChart>`.
+
+#### 10.4.6 Sentiment Pulse Widget — Sprint 5
+
+**Real-time sentiment** for watched symbols + market overall. 3 modes:
+- **Per-symbol gauge**: weighted score with article count and trend arrow
+- **Market mood meter**: aggregate across S&P (already have data in `news_daily_summaries`)
+- **Sentiment-vs-price divergence detector** — alerts when sentiment turns positive while price still falling (and vice versa)
+
+---
+
+### 10.5 Operations & Risk (Sprint 7 — Polish Existing)
+
+#### 10.5.1 Risk Dashboard Widget
+
+**Reusable**: `<RiskGauges>` summarizing:
+- Current drawdown vs max drawdown limit (radial gauge)
+- Position concentration (largest position % of portfolio)
+- Leverage / margin usage
+- Daily loss limit progress bar
+- Kill-switch status (already partially surfaced)
+
+Surface on dashboard top-right. Click → `/risk`.
+
+#### 10.5.2 Kill-Switch UX Upgrade
+
+**Current**: `KillSwitchBanner.js` shows state.
+
+**Add**:
+- Confirmation dialog with countdown ("Hold 3s to engage")
+- Reason input (logged to `monitoring_events`)
+- Auto-trigger conditions config (loss threshold, max trades/day, etc.)
+
+#### 10.5.3 Strategy Health Cards
+
+**On `/strategies`** — for each strategy, show:
+- Status (running/stopped/error)
+- Last 7-day P&L, Sharpe, win-rate
+- Trade count, avg holding time
+- Toggle on/off (with confirm)
+- "Backtest this" button → preloads backtest form
+
+#### 10.5.4 Order Book Depth Widget (for Scalping)
+
+**For symbols** where Alpaca crypto provides L2 (`/market/crypto/orderbook`):
+- Visual ladder, bid/ask totals, spread
+- Click level to set limit price in trade ticket
+
+---
+
+### 10.6 Mobile / Responsive (Sprint 8)
+
+Already have `BottomNav.js` and `PullToRefresh`. Build on it:
+
+#### 10.6.1 Mobile-first Trade Ticket
+Bottom-sheet variant of `<TradeTicket>` with biometric confirm.
+
+#### 10.6.2 Quick Actions Floating Button
+Mobile FAB → ticket / search / kill-switch / alerts.
+
+#### 10.6.3 Compact Dashboard
+`density: comfortable | compact | dense` toggle persisted per user.
+
+#### 10.6.4 Haptic Feedback
+On order submit, alert fire, etc. (`navigator.vibrate`).
+
+---
+
+### 10.7 Onboarding & Discoverability (Sprint 8)
+
+#### 10.7.1 First-Run Tour
+Library: `react-joyride` or `driver.js`. Interactive walkthrough of dashboard, paper-mode banner, kill switch, strategies.
+
+#### 10.7.2 Empty States with Calls-to-Action
+Every list page (`/trades`, `/alerts`, `/portfolio` etc.) gets `<EmptyState>` with primary action.
+
+#### 10.7.3 Live API Status Page
+Move `/api-test` → user-facing `/status` showing 8 services' health from `/api/monitoring/health`. Lightweight transparency.
+
+#### 10.7.4 Settings Page
+New `/settings` consolidating:
+- Theme, density, default chart timeframe
+- Default order params (TIF, size mode)
+- Notification prefs (which events → bell, which → email)
+- Paper/live toggle
+- Watchlist management
+- Saved dashboard layouts
+- Hotkey customization
+
+---
+
+### 10.8 Performance & Polish (Sprint 8)
+
+#### 10.8.1 Code-split Heavy Charts
+Already using `dynamic()` in some places — extend to all chart pages.
+
+#### 10.8.2 Streaming SSR for Next.js App Router
+`/dashboard` should stream welcome banner immediately and stream stats as ready.
+
+#### 10.8.3 Optimistic UI Everywhere
+Journal edits, alert toggles, watchlist add/remove — feel instant.
+
+#### 10.8.4 Animations
+`framer-motion` for page transitions, list reorder, modal enter/exit. Consistent, not gratuitous.
+
+#### 10.8.5 Accessibility
+- Add `<SkipLink>` to layout
+- Audit all modals for focus-trap + Esc
+- Color-contrast pass on red/green badges
+- Table `<caption>` and `aria-sort` on sortable columns
+- `prefers-reduced-motion` respect
+
+---
+
+### 10.9 Sprint Breakdown
+
+| Sprint | Focus | Deliverables | Why |
+|---|---|---|---|
+| **1** | Architectural Foundations | shadcn/ui primitives, TanStack Query, Toaster, ErrorBoundary, Zustand, chart consolidation | Unblocks everything; reduces every subsequent ticket by 50% |
+| **2** | Real-time + Notifications | WebSocket layer, Live P&L ribbon, Notifications center, Command Palette | Day-trading credibility |
+| **3** | Core Workflow | Universal Trade Ticket, Watchlist workspace | Daily workflow essentials |
+| **4** | Visual Table-Stakes | Pro chart on `/symbol` (lightweight-charts), Heatmap | Competitive parity |
+| **5** | AI Differentiation | AI Trade Ideas feed, ML Reasoning Panel, Confidence Calibration, Strategy Comparison Lab, Sentiment Pulse | **Where you win** |
+| **6** | AI Wow Factor | AI Co-Pilot Chat (read-only v1) | Viral feature |
+| **7** | Pro-Trader Confidence | Risk dashboard, Strategy health, Kill-switch UX | Trust + safety |
+| **8** | Retention | Settings, Onboarding, Mobile polish, Performance, Accessibility | Long-term engagement |
+
+---
+
+### 10.10 Quick Wins (< 1 Day Each)
+
+Ship value immediately while sprints run:
+
+- ✅ **Toaster wiring** — `sonner` installed but unused; wire to all `try/catch` blocks (replaces `console.error`)
+- ✅ **Skeleton states** everywhere instead of full-page spinners
+- ✅ **Number flash** on ticker price updates (CSS keyframe)
+- ✅ **Connection indicator** in navbar (green/red dot for backend health)
+- ✅ **Currency-aware formatters** in `lib/format.js` — currently each page reimplements `fmt`/`fmtPct`
+- ✅ **Paper/Live banner** — top of every trading page if `account.is_paper === true`
+- ✅ **Error boundary** on dashboard — would have prevented `toFixed` whitepage
+- ✅ **Markdown reasoning** in signals (currently plain text)
+
+---
+
+### 10.11 Success Criteria
+
+- [ ] **Sprint 1**: All pages use `<Button>`, `<Card>`, `<Table>` from component library; zero hand-rolled modals
+- [ ] **Sprint 2**: WebSocket connection indicator live; P&L ribbon updates <100ms on tick
+- [ ] **Sprint 3**: Trade ticket accessible from 10+ surfaces; watchlist supports drag-to-reorder
+- [ ] **Sprint 4**: `/symbol` chart renders candlesticks with ML markers; heatmap on dashboard
+- [ ] **Sprint 5**: AI Trade Ideas feed shows 10+ ranked candidates with "Why" cards; confidence calibration chart on `/models`
+- [ ] **Sprint 6**: AI Co-Pilot answers "Show me oversold tech with positive sentiment" in <2s
+- [ ] **Sprint 7**: Risk dashboard shows all 5 gauges; kill-switch requires 3s hold + reason
+- [ ] **Sprint 8**: Settings page consolidates 8+ preference categories; first-run tour completes
+
+---
+
+### 10.12 Dependencies on Phase 8 (Backend)
+
+Frontend Phase 7 can proceed **independently** of backend Phase 8, with graceful degradation:
+
+| Frontend Feature | Backend Dependency | Fallback |
+|---|---|---|
+| WebSocket layer | Phase 8C (Redis Pub/Sub) | Polling (current) |
+| Trade Ticket AI assist | Phase 8B (real strategies in backtest) | Static recommendations |
+| AI Trade Ideas feed | `/api/ml/predictions` (already live) | None — works today |
+| ML Reasoning Panel | `/api/ml/feature-importance` (already live) | None — works today |
+| Live order execution | Phase 8A (`POST /api/trading/execute`) | Paper-mode only |
+
+**Recommendation**: Start Sprint 1 (Foundations) immediately. Sprints 2–8 can run in parallel with Phase 8 backend work.
+
+---
