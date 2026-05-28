@@ -400,7 +400,26 @@ across asset classes (stocks, crypto, forex, options).
 - Crypto extended: historical trades, latest orderbook.
 - WebSocket: live price/quote/trade streams for stocks + crypto + news.
 - Provider adapters (Alpaca today; OANDA/TwelveData for forex deferred — forex rates served from open.er-api.com free tier via Gateway).
-- Caching layer (Redis) for frequently-hit endpoints (deferred; in-process TTL cache in use).
+- Caching layer: **in-process TTL cache active** (`app/cache.py`) — 1.5s TTL for equities, 5s for crypto, collapses duplicate symbol requests into one Alpaca call. Thread-safe, process-local. **Redis deferred** (confirmed 2026-05-28 — not installed on cPanel, not needed at current scale).
+
+#### Redis Decision Log
+
+**Decision**: Deferred until a concrete trigger below is hit. Do NOT add for speculative performance gains.
+
+**Implement Redis (Upstash — cloud-hosted, connects via `REDIS_URL`, no server install) when any one of these is true:**
+
+1. **WebSocket price streaming** — Real-time frontend price pushes require Redis Pub/Sub. Market Data Service publishes price events; Gateway subscribes and fans out to WebSocket clients. Without it, polling stays at 1.5s — acceptable for now, noticeable for a live trading UI.
+2. **Price alert triggers** — Sub-100ms alert firing (e.g. AAPL hits $315 → instant frontend alert) requires Pub/Sub. Current polling approach fires alerts with up to 1.5s lag.
+3. **Multiple Passenger workers** — If `PassengerMaxPool` is increased above 1, the in-process cache fragments: each worker has its own dict, causing duplicate Alpaca calls. Redis becomes the shared cache layer.
+4. **Cross-service cache sharing** — If KTI-Gateway needs to read a price cached by KTI-Market-Data-Service (or vice versa) without an extra HTTP round-trip.
+5. **Rate-limit headroom** — If Alpaca data rate limits become a real constraint (current IEX free tier: 200 requests/min per key), Redis-backed request coalescing across all consumers eliminates duplicate calls.
+
+**Implementation notes (when the time comes):**
+- Use `Upstash Redis` (free tier, `rediss://` TLS URL, no VPS required)
+- Cache key structure: `kti:mds:{endpoint}:{asset_class}:{sorted_symbols_hash}` — matches existing `CacheKey` dataclass in `app/cache.py`
+- TTLs unchanged: 1.5s equities, 5s crypto — just move from `_store` dict to `redis.setex()`
+- `app/cache.py` is designed for this migration: same `get()/set()` interface, swap the backend
+- Add `REDIS_URL` env var to `KTI-Market-Data-Service/.env` and `.env.example`
 
 **Pulled from**
 - TS: `app/api/market/**`.
