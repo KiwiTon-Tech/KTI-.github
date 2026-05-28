@@ -1,7 +1,7 @@
 # KiwiTon Investments — Microservices Architecture
 
-> **Status**: Phase 6 in progress — all 8 services live, full frontend ↔ gateway wiring complete (Phases A/B/C), structured JSON logging + Prometheus `/metrics` deployed; Grafana Cloud scrape config pending
-> **Last updated**: 2026-05-24
+> **Status**: Phase 6 complete (8 services live, structured logging + Prometheus); Phase 7 frontend in progress — Workstreams A (order execution UI) and C (WebSocket layer) shipped, Section 10.2 architectural substrate complete, Sprint 2 page rollouts underway (`/positions`, `/dashboard`, `/trades`, `/signals`, `/models`, `/symbol`, `/backtests`, `/trade` migrated)
+> **Last updated**: 2026-05-28
 > **Owner**: Zander Bolyanatz
 
 This document describes the target microservices decomposition for the KiwiTon
@@ -1146,13 +1146,19 @@ Deep dive in [`docs/CPANEL_DEPLOYMENT.md`](./CPANEL_DEPLOYMENT.md).
 
 ## 10. Phase 7 — Frontend UX Modernization
 
-**Status**: Planned (2026-05-28)  
+**Status**: ✅ Section 10.2 Substrate complete (Sprint 1A–1D shipped 2026-05-28); 🟡 Sprint 2 page rollouts in progress — `/positions`, `/dashboard`, `/trades`, `/signals`, `/models`, `/symbol`, `/backtests`, `/trade` migrated. `/sentiment`, `/portfolio`, `/orchestrator`, `/risk`, `/alerts`, `/journal`, `/strategies`, `/monitoring`, `/performance`, `/statements`, `/execution`, `/options`, `/forex`, `/market-search` still pending.
 **Repo**: `KiwiTon Investment Frontend`  
 **Goal**: Transform the frontend from functional MVP into a production-grade day-trading platform with AI/ML differentiation.
 
+**Phase 7 Frontend Workstreams (separate from §10.2 substrate):**
+- ✅ **Workstream A — Live Order Execution UI** — `OrderConfirmDialog` (paper/live banner, ack checkbox, 3s countdown), `TradeTicket` form (idempotency-key generation, 403/422/409 inline error mapping), `/trade` route. **Backend route still stubbed** — UI ready when Gateway implements `POST /api/trading/execute`.
+- ✅ **Workstream C — WebSocket Realtime** — `src/lib/realtime.js` native `WebSocket` client with exponential-backoff reconnect, `useRealtimePrice` hook, `ConnectionStatus` indicator (green/amber/red dot in navbar). Wire format matches Gateway flask-sock raw WS. **Backend Pub/Sub still pending** — frontend lights up when ready.
+- ⏳ **Workstream B — Real Strategy Backtesting** — frontend was ready before this phase (`/backtests` already fetches dynamic strategies); blocked on backend registering `MLTrader`/`CryptoTrader`/`ForexTrader` in the Backtest Service registry.
+- ⏳ **Workstream D — ML Artifact Storage (S3/R2)** — backend-only, no frontend work.
+
 ### 10.1 Problem Statement
 
-Current state (as of Phase 6):
+Original state (Phase 6):
 - ✅ All backend services live and wired
 - ✅ Every `api.js` endpoint has a real Gateway route
 - ✅ 24 pages, ~13K LOC, functional but not polished
@@ -1163,68 +1169,91 @@ Current state (as of Phase 6):
 - ❌ **Polling-only**: 1.5s cadence unusable for day trading (scalping needs <100ms)
 - ❌ **ML/AI underutilized**: heavy backend investment (ML Service, Sentiment, NLP) barely surfaced in UI
 
-**For a day-trading platform competing on AI/ML, this is the biggest gap.**
+**As of 2026-05-28**:
+- ✅ Substrate (§10.2) complete — primitives + TanStack Query + chart consolidation + WebSocket layer all shipped
+- 🟡 Page rollouts (Sprint 2) in progress — 8 of 24 pages migrated to the new primitives
+- ❌ AI/ML differentiation (§10.4) still pending — biggest remaining gap
 
 ### 10.2 Architectural Foundations (Sprint 1 — Required First)
 
 These aren't "features" — they're the substrate that makes every subsequent feature 10× faster to ship.
 
-#### 10.2.1 Component Library (`src/components/ui/*`)
+#### 10.2.1 Component Library (`src/components/ui/*`) — ✅ SHIPPED (Sprint 1A + 1C)
 
-**Install**: `shadcn/ui` (Radix primitives + Tailwind, zero runtime cost)
+**Stack**: shadcn-style hand-authored primitives on Radix + CVA + `clsx`/`tailwind-merge`. Tailwind v4 `@theme` block extended with shadcn HSL design tokens (light + dark) + `tailwindcss-animate` plugin loaded via `@plugin` directive. No CLI used — primitives are hand-written for full control over the v4 alpha integration.
 
-**Core primitives**:
-- `Button`, `IconButton`, `ButtonGroup` — `variant` prop (`primary | secondary | ghost | danger | success`)
-- `Card`, `CardHeader`, `CardBody`, `CardFooter`
-- `Modal`, `Dialog`, `Drawer`, `Sheet` — replaces every ad-hoc `fixed inset-0` modal
-- `Tabs`, `Pill`, `Badge`, `StatusDot`
-- `Table` — sticky header, sortable columns, row virtualization (`@tanstack/react-table` + `react-virtuoso`)
-- `Input`, `NumberInput`, `Select`, `Combobox`, `Slider`, `Toggle`, `RadioGroup`
-- `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`
-- `Skeleton` — shimmer placeholders
-- `Toast` — wire `sonner` (already installed but unused) into global `<Toaster />`
-- `EmptyState`, `ErrorState`, `LoadingState` — currently inlined dozens of times
+**Core primitives shipped** (`src/components/ui/`):
+- ✅ `Button` (CVA variants: `primary | secondary | ghost | danger | success | outline | link | gradient`, sizes `sm | md | lg | icon`, `asChild` via Slot)
+- ✅ `Card` family (`Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`)
+- ✅ `Dialog` family (Radix-backed: `Dialog`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogDescription`, `DialogFooter`, `DialogTrigger`, `DialogClose`) — focus trap, ESC handling, click-outside dismiss free
+- ✅ `Tabs` (Radix-backed)
+- ✅ `Input`, `Label` (Radix-backed)
+- ✅ `Badge` (variants `default | secondary | outline | success | warning | danger`)
+- ✅ `Skeleton`
+- ✅ `Toaster` — confirmed already mounted in `providers.js` via `sonner`; legacy doc line was wrong
 
-**Trading-specific primitives**:
-- `Sparkline` — tiny inline chart for ticker rows
-- `PriceCell` — animated up/down flash on price update
-- `PnLBadge` — auto color + sign + percent
-- `SignalChip` — buy/sell/hold with confidence ring
-- `ConfidenceBar` — already in `models/page.js`, promote to reusable
-- `SymbolBadge`, `AssetClassPill`
+**Deferred** (build when first page actually needs them):
+- ⏳ `Select` (Radix-backed, large primitive — defer to first surface that needs it)
+- ⏳ `Combobox`, `Slider`, `Toggle`, `RadioGroup`, `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Sheet`, `Drawer`, `IconButton`, `ButtonGroup`, `EmptyState`, `ErrorState`, `LoadingState`
+- ⏳ Virtualised `Table` (`@tanstack/react-table` + `react-virtuoso`) — current pages don't have list sizes that warrant virtualisation
 
-#### 10.2.2 State Management with TanStack Query
+**Trading-specific primitives shipped** (`src/components/ui/`):
+- ✅ `Sparkline` — pure SVG line chart, auto-colored by trend, optional gradient fill
+- ✅ `PriceCell` — flashes green/red for `flashMs` ms on price change; first render never flashes
+- ✅ `PnLBadge` — auto sign/color, variants `inline | soft | solid`, sizes `sm | md | lg`, optional percent suffix
+- ✅ `SignalChip` — buy/sell/hold pill with optional SVG confidence ring (uses `ConfidenceRing` sub-component)
+- ✅ `ConfidenceBar` — promoted from `models/page.js`; color zones at ≥0.7 / ≥0.5 / <0.5
+- ✅ `SymbolBadge` — symbol display with parqet logo (equities only) and letter-avatar fallback for crypto/forex/options
+- ✅ `AssetClassPill` — color-coded pill (`stock` blue, `crypto` amber, `forex` violet, `option` cyan)
+- ✅ `CandlestickChart` — TradingView Lightweight Charts wrapper, theme-aware, candles/line mode toggle, volume histogram overlay (covered in §10.2.3)
 
-**Replace**: `useApiData` hook with `@tanstack/react-query`
+#### 10.2.2 State Management with TanStack Query — ✅ SHIPPED (Sprint 1B)
 
-**Benefits**:
-- Automatic cache + request deduplication (dashboard's 5 parallel calls → 1)
-- `refetchInterval` for polling (sub-second for prices)
-- `staleTime` / `gcTime` per endpoint
-- Optimistic updates for journal edits, alert toggles
-- Mutations with rollback
-- DevTools panel for debugging
+**Stack**: `@tanstack/react-query@latest` + `@tanstack/react-query-devtools` (dev-only mount).
 
-**Migration**: Wrap existing `apiClient` in typed `queryFns`, migrate callers in batches.
+**Provider**: `QueryClientProvider` wraps `Auth` + `Theme` providers in `src/app/providers.js`. Lazy `useState` initialiser keeps the client singleton across React 18 strict-mode double-renders. Defaults: `staleTime: 30s`, `gcTime: 5min`, `refetchOnWindowFocus: true`, `retry: 1` (mutations: `retry: 0`).
 
-#### 10.2.3 Chart Library Consolidation
+**Shared key factory**: `src/lib/query-keys.js` exports `brokerKeys`, `orchestratorKeys`, `monitoringKeys`, `tradingKeys`, `marketKeys`, `mlKeys`, `tradeKeys`, `backtestKeys`. Cross-page cache dedup is real: `/dashboard`, `/positions`, and TradeTicket all hit `brokerKeys.account()` and `brokerKeys.positions()` — opening one then another renders instantly from cache.
 
-**Current**: `recharts` + `apexcharts` + `chart.js` + `react-chartjs-2` + `react-apexcharts` (~600KB gzip)
+**Migrated to React Query**:
+- ✅ `/backtests` (3 list/summary/by-symbol queries + strategies query + run mutation with cache invalidation)
+- ✅ TradeTicket component (account + latest-bar queries + executeTrade mutation)
+- ✅ `/positions` (positions query, 15s staleTime)
+- ✅ `/dashboard` (5 parallel queries: account, positions, orchestrator status, system health 30s polling, strategies)
+- ✅ `/trades` (list + summary queries with shared `tradeKeys`)
+- ✅ `/signals` (ML predictions + recent trades — shares `tradeKeys.list()` cache with `/trades`)
 
-**Target**:
-- **`recharts`** — analytics dashboards (P&L, equity curves, distributions)
-- **`lightweight-charts`** (TradingView, ~40KB) — candlestick/intraday for day trading
-- **Drop**: `chart.js`, `apexcharts`, `react-chartjs-2`, `react-apexcharts`
+**Still on legacy `useApiData`**:
+- ⏳ `/alerts`, `/portfolio`, `/orchestrator`, `/risk`, `/sentiment`, `/strategies`, `/monitoring`, `/performance`, `/statements`, `/execution`, `/options`, `/forex`, `/journal`, `/symbol` (uses raw `useEffect` rather than `useApiData`)
 
-#### 10.2.4 Real-Time WebSocket Layer
+**`useApiData` retired path**: Will be deleted entirely once the remaining 14 pages migrate. Currently kept for backwards compatibility.
+
+#### 10.2.3 Chart Library Consolidation — ✅ SHIPPED (Sprint 1A + 1D)
+
+**Removed** (Sprint 1A — were entirely unused in `src/`): `apexcharts`, `chart.js`, `react-chartjs-2`, `react-apexcharts`. ~600 kB gzip out of the bundle.
+
+**Added** (Sprint 1D): `lightweight-charts@5.2.0` (~40 kB gzip).
+
+**Current chart stack**:
+- `recharts` — kept for analytics dashboards (`/performance`, `/statements`)
+- `lightweight-charts` — TradingView candlesticks for intraday charts. Wrapped in `src/components/ui/candlestick-chart.js` with theme-aware (light/dark) palette swap on `theme` change, `autoSize: true`, candles/line mode toggle, volume histogram overlay, proper `IChartApi` cleanup on unmount
+- Used on `/symbol` (replaced bespoke SVG line chart). `/symbol` First Load JS jumped 137 kB → 220 kB; route-scoped, paid only when user navigates there
+
+**Future**: dynamic-import `CandlestickChart` if a second page needs it, so the 40 kB lives in a shared chunk.
+
+#### 10.2.4 Real-Time WebSocket Layer — ✅ SHIPPED (Phase 7 Workstream C, 2026-05-28)
 
 **Frontend scaffolding** (independent of backend Phase 8C timing):
-- `lib/realtime.js` — `RealtimeClient` class wrapping `socket.io-client` (already installed)
-- `useRealtimePrice(symbol)` hook — falls back to polling if WS unavailable
-- Channels: `prices.{symbol}`, `orders.fills`, `alerts.fired`, `orchestrator.status`
-- Connection-state indicator in navbar (green/amber/red dot, Bloomberg-style)
+- ✅ `src/lib/realtime.js` — `RealtimeClient` singleton using **native `WebSocket`** (not `socket.io-client` — backend Gateway uses `flask-sock` which serves raw WS frames). Exponential-backoff reconnect (1s → 30s capped), per-symbol listener registry, JSON `subscribe`/`unsubscribe` control frames, status broadcast (`connecting | connected | disconnected`)
+- ✅ `src/hooks/useRealtimePrice(symbol)` — returns `{ price, lastUpdate }`, lazy-opens connection on first subscribe, callers fall back to a REST snapshot when `price` is `null`
+- ✅ `src/components/layout/ConnectionStatus.js` — green/amber/red dot + label, mounted in Navbar (logged-in users only)
+- ✅ Wire format: `{ symbol, price, size, timestamp, asset_class }` per tick (matches Market Data Service publishing format from Phase 7 Workstream C plan §4.3)
 
-When backend ships WebSocket (Phase 8C), frontend lights up with no refactor.
+**Channels not yet wired**: `orders.fills`, `alerts.fired`, `orchestrator.status` — backend Pub/Sub channels need to exist first.
+
+**Polling fallback**: not yet implemented; the hook returns `null` on disconnect and callers are expected to use REST snapshots. Adding automatic polling fallback is a future ~30-line addition.
+
+**Status**: Frontend lights up automatically when backend Pub/Sub + flask-sock `/ws/prices` route is deployed (Phase 8C).
 
 #### 10.2.5 Global State with Zustand
 
@@ -1504,16 +1533,19 @@ Journal edits, alert toggles, watchlist add/remove — feel instant.
 
 ### 10.9 Sprint Breakdown
 
-| Sprint | Focus | Deliverables | Why |
+| Sprint | Focus | Deliverables | Status |
 |---|---|---|---|
-| **1** | Architectural Foundations | shadcn/ui primitives, TanStack Query, Toaster, ErrorBoundary, Zustand, chart consolidation | Unblocks everything; reduces every subsequent ticket by 50% |
-| **2** | Real-time + Notifications | WebSocket layer, Live P&L ribbon, Notifications center, Command Palette | Day-trading credibility |
-| **3** | Core Workflow | Universal Trade Ticket, Watchlist workspace | Daily workflow essentials |
-| **4** | Visual Table-Stakes | Pro chart on `/symbol` (lightweight-charts), Heatmap | Competitive parity |
-| **5** | AI Differentiation | AI Trade Ideas feed, ML Reasoning Panel, Confidence Calibration, Strategy Comparison Lab, Sentiment Pulse | **Where you win** |
-| **6** | AI Wow Factor | AI Co-Pilot Chat (read-only v1) | Viral feature |
-| **7** | Pro-Trader Confidence | Risk dashboard, Strategy health, Kill-switch UX | Trust + safety |
-| **8** | Retention | Settings, Onboarding, Mobile polish, Performance, Accessibility | Long-term engagement |
+| **1A** | Substrate — UI primitives | shadcn primitives (Button, Card, Dialog, Input, Label, Badge, Skeleton, Tabs), Tailwind v4 token wiring, drop unused chart deps | ✅ Shipped |
+| **1B** | Substrate — TanStack Query | QueryClientProvider, shared `query-keys.js`, migrate `/backtests` + TradeTicket | ✅ Shipped |
+| **1C** | Substrate — Trading primitives | Sparkline, PriceCell, PnLBadge, SignalChip, ConfidenceBar, SymbolBadge, AssetClassPill; migrate `/models` | ✅ Shipped |
+| **1D** | Substrate — TradingView charts | `lightweight-charts` install, `CandlestickChart` wrapper, `/symbol` migration | ✅ Shipped |
+| **2** | Page rollouts (the high-leverage move) | Migrate remaining 16 pages to primitives + TanStack Query | 🟡 In progress (8/24 done: `/positions`, `/dashboard`, `/trades`, `/signals`, `/models`, `/symbol`, `/backtests`, `/trade`) |
+| **3** | Core Workflow | Universal Trade Ticket on more surfaces, Watchlist workspace | TradeTicket component ✅; mount on more pages ⏳ |
+| **4** | Real-time + Notifications | Wire `useRealtimePrice` into rows, Live P&L ribbon, Notifications center, Command Palette | Frontend client ✅, awaiting backend Pub/Sub |
+| **5** | AI Differentiation | AI Trade Ideas feed, ML Reasoning Panel, Confidence Calibration, Strategy Comparison Lab, Sentiment Pulse | ⏳ |
+| **6** | AI Wow Factor | AI Co-Pilot Chat (read-only v1) | ⏳ |
+| **7** | Pro-Trader Confidence | Risk dashboard, Strategy health, Kill-switch UX | ⏳ |
+| **8** | Retention | Settings, Onboarding, Mobile polish, Performance, Accessibility | ⏳ |
 
 ---
 
@@ -1521,27 +1553,32 @@ Journal edits, alert toggles, watchlist add/remove — feel instant.
 
 Ship value immediately while sprints run:
 
-- ✅ **Toaster wiring** — `sonner` installed but unused; wire to all `try/catch` blocks (replaces `console.error`)
-- ✅ **Skeleton states** everywhere instead of full-page spinners
-- ✅ **Number flash** on ticker price updates (CSS keyframe)
-- ✅ **Connection indicator** in navbar (green/red dot for backend health)
-- ✅ **Currency-aware formatters** in `lib/format.js` — currently each page reimplements `fmt`/`fmtPct`
-- ✅ **Paper/Live banner** — top of every trading page if `account.is_paper === true`
-- ✅ **Error boundary** on dashboard — would have prevented `toFixed` whitepage
-- ✅ **Markdown reasoning** in signals (currently plain text)
+- ✅ **Toaster wiring** — verified already mounted in `providers.js` via `sonner` (legacy doc claim was wrong); `TradeTicket` and others use `toast.success`/`toast.error` correctly
+- ✅ **Skeleton states** — `Skeleton` primitive shipped Sprint 1A; consumed by `/positions`, `/dashboard`, `/trades`, `/signals`. Other pages still on `animate-pulse` divs.
+- ✅ **Number flash** on ticker price updates — `PriceCell` primitive shipped Sprint 1C, used on `/positions` and `/symbol`. Animation triggers on prop changes; will activate fully when `useRealtimePrice` is wired into rows
+- ✅ **Connection indicator** in navbar — green/amber/red `ConnectionStatus` shipped Phase 7 Workstream C
+- ⏳ **Currency-aware formatters** in `lib/format.js` — partial: each migrated page now uses `PnLBadge` for P&L formatting, but local `formatCurrency`/`fmt` helpers remain. Centralizing into `lib/format.js` is a future cleanup
+- ⏳ **Paper/Live banner** — `OrderConfirmDialog` has it; need a global banner component for top-of-page on trading surfaces when `account.is_paper === true`
+- ⏳ **Error boundary** on dashboard — not yet shipped
+- ⏳ **Markdown reasoning** in signals — current `/signals` shows structured `DetailCard` items; markdown rendering deferred
 
 ---
 
 ### 10.11 Success Criteria
 
-- [ ] **Sprint 1**: All pages use `<Button>`, `<Card>`, `<Table>` from component library; zero hand-rolled modals
-- [ ] **Sprint 2**: WebSocket connection indicator live; P&L ribbon updates <100ms on tick
-- [ ] **Sprint 3**: Trade ticket accessible from 10+ surfaces; watchlist supports drag-to-reorder
-- [ ] **Sprint 4**: `/symbol` chart renders candlesticks with ML markers; heatmap on dashboard
-- [ ] **Sprint 5**: AI Trade Ideas feed shows 10+ ranked candidates with "Why" cards; confidence calibration chart on `/models`
-- [ ] **Sprint 6**: AI Co-Pilot answers "Show me oversold tech with positive sentiment" in <2s
-- [ ] **Sprint 7**: Risk dashboard shows all 5 gauges; kill-switch requires 3s hold + reason
-- [ ] **Sprint 8**: Settings page consolidates 8+ preference categories; first-run tour completes
+- 🟡 **Sprint 1**: All pages use `<Button>`, `<Card>`, `<Table>` from component library; zero hand-rolled modals
+  - ✅ Component library + 7 trading primitives shipped
+  - ✅ TanStack Query + shared key factories shipped
+  - ✅ Chart consolidation done
+  - ✅ WebSocket layer + `ConnectionStatus` indicator live
+  - 🟡 8/24 pages migrated; 16 still hand-roll modals/buttons
+- 🟡 **Sprint 2**: WebSocket connection indicator live (✅); P&L ribbon updates <100ms on tick (⏳ — depends on backend Pub/Sub)
+- ⏳ **Sprint 3**: Trade ticket accessible from 10+ surfaces (✅ component shipped, mounted on `/trade` only — future surfaces TBD); watchlist supports drag-to-reorder
+- 🟡 **Sprint 4**: `/symbol` chart renders candlesticks (✅ via lightweight-charts, no ML markers yet); heatmap on dashboard (⏳)
+- ⏳ **Sprint 5**: AI Trade Ideas feed shows 10+ ranked candidates with "Why" cards; confidence calibration chart on `/models`
+- ⏳ **Sprint 6**: AI Co-Pilot answers "Show me oversold tech with positive sentiment" in <2s
+- ⏳ **Sprint 7**: Risk dashboard shows all 5 gauges; kill-switch requires 3s hold + reason
+- ⏳ **Sprint 8**: Settings page consolidates 8+ preference categories; first-run tour completes
 
 ---
 
@@ -1549,14 +1586,15 @@ Ship value immediately while sprints run:
 
 Frontend Phase 7 can proceed **independently** of backend Phase 8, with graceful degradation:
 
-| Frontend Feature | Backend Dependency | Fallback |
-|---|---|---|
-| WebSocket layer | Phase 8C (Redis Pub/Sub) | Polling (current) |
-| Trade Ticket AI assist | Phase 8B (real strategies in backtest) | Static recommendations |
-| AI Trade Ideas feed | `/api/ml/predictions` (already live) | None — works today |
-| ML Reasoning Panel | `/api/ml/feature-importance` (already live) | None — works today |
-| Live order execution | Phase 8A (`POST /api/trading/execute`) | Paper-mode only |
+| Frontend Feature | Backend Dependency | Fallback | Status |
+|---|---|---|---|
+| WebSocket layer | Phase 8C (Redis Pub/Sub + flask-sock `/ws/prices`) | Polling (current) | Frontend ✅ shipped, awaiting backend |
+| Live order execution | Phase 8A (`POST /api/trading/execute`) | Paper-mode only | Frontend ✅ shipped (`/trade`), awaiting backend route |
+| Trade Ticket AI assist | Phase 8B (real strategies in backtest) | Static recommendations | Frontend uses snapshot REST today |
+| AI Trade Ideas feed | `/api/ml/predictions` (already live) | None — works today | ⏳ frontend page not yet built |
+| ML Reasoning Panel | `/api/ml/feature-importance` (already live) | None — works today | ⏳ frontend not yet built |
+| Real-strategy Backtests | Phase 8B (MLTrader/CryptoTrader/ForexTrader registered in registry) | SMA Crossover only | Frontend ✅ already dynamic |
 
-**Recommendation**: Start Sprint 1 (Foundations) immediately. Sprints 2–8 can run in parallel with Phase 8 backend work.
+**Status**: Sprint 1 substrate (§10.2) complete. Sprint 2 page rollouts in progress (8/24 pages migrated). Sprints 3–8 can run in parallel with Phase 8 backend work.
 
 ---
