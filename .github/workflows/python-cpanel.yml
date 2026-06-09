@@ -4,9 +4,10 @@ on:
   workflow_call:
     inputs:
       app_path:
-        description: "Absolute path on the cPanel server (e.g. /home/user/apps/broker-service)"
-        required: true
+        description: "Absolute path on the cPanel server (e.g. /home/user/apps/broker-service). Required when deploy_enabled is true; ignored otherwise."
+        required: false
         type: string
+        default: ""
       python_version:
         description: "Python version on the cPanel server (must match the app's virtualenv)"
         required: false
@@ -22,18 +23,27 @@ on:
         required: false
         type: boolean
         default: true
+      deploy_enabled:
+        description: "If false, only lint+test runs — no rsync/deploy to cPanel. Set false for pip-package repos consumed via git+https rather than deployed as a Passenger app (e.g. KTI-Strategies)."
+        required: false
+        type: boolean
+        default: true
       sync_env:
         description: "If true, write DOTENV_CONTENT secret to <app_path>/.env on the server (mode 600). Use to rotate secrets."
         required: false
         type: boolean
         default: false
     secrets:
+      # Only consumed by the `deploy` job, so these are optional at the
+      # contract level — a deploy_enabled:false (package-only) caller can
+      # invoke this workflow without having cPanel secrets configured.
+      # When deploy_enabled is true the deploy steps require them.
       CPANEL_HOST:
-        required: true
+        required: false
       CPANEL_USER:
-        required: true
+        required: false
       CPANEL_SSH_KEY:
-        required: true
+        required: false
       DOTENV_CONTENT:
         description: "Full body of the service's .env file. Required only when sync_env=true."
         required: false
@@ -87,12 +97,19 @@ jobs:
 
   deploy:
     needs: lint-and-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: ${{ inputs.deploy_enabled && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-${{ inputs.app_path }}
       cancel-in-progress: false
     steps:
+      - name: Validate deploy inputs
+        run: |
+          if [ -z "${{ inputs.app_path }}" ]; then
+            echo "::error::deploy_enabled is true but app_path is empty. Provide app_path, or set deploy_enabled: false for package-only repos."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Configure SSH

@@ -564,3 +564,173 @@ LOG_LEVEL=INFO
 
 > ⚠️ Copy `SHARED_AUTH_TOKEN` from this service's `.env` into the **KTI-Gateway** `.env`
 > as `STRATEGY_ENGINE_SERVICE_TOKEN` so the gateway can authenticate its proxy calls.
+
+### KTI-Backtest-Service
+
+| Field | Value |
+|-------|-------|
+| Repo | `KiwiTon-Tech/KTI-Backtest-Service` |
+| Application root | `apps/KTI-Backtest-Service` |
+| Application URL | `backtest.kiwiton-investments.com` |
+| Startup file | `passenger_wsgi.py` |
+| Entry point | `application` |
+| Python version | 3.11 |
+| DNS type | A — **DNS only** (grey cloud) |
+
+> **Consumes a private package.** `requirements.txt` pulls the shared
+> strategy classes via
+> `git+https://github.com/KiwiTon-Tech/KTI-Strategies.git@main#egg=kti-strategies`.
+> Because `KTI-Strategies` is **private**, `pip install` must be able to
+> authenticate to GitHub:
+>
+> - **On cPanel** — the global git credential helper from **B5** injects a
+>   fresh App token, so `pip install -r requirements.txt` clones it
+>   transparently. No extra step.
+> - **In CI** — the reusable workflow's "Configure git auth for private
+>   GitHub deps" step needs the `GH_DEPS_TOKEN` repo secret set (see
+>   ARCHITECTURE.md §8). Without it the `git+https` clone 404s.
+
+> **`thetadata` pin.** `lumibot==3.8.16` hard-depends on `thetadata`, whose
+> only py3.11-compatible releases are yanked on PyPI (the non-yanked 1.x
+> line requires py3.12). `requirements.txt` therefore pins
+> `thetadata==0.9.11` **before** `lumibot` — pip installs a yanked version
+> when pinned with `==`. Keep this in lockstep with
+> `KTI-Strategies/requirements.txt`. Removing the pin breaks every fresh
+> install on Python 3.11.
+
+**Full per-service setup (Part C) for this service:**
+
+```bash
+SVC=KTI-Backtest-Service
+
+# C1: Cloudflare DNS — add A record: backtest → <server-IP>, DNS only
+# C2: cPanel → Setup Python App → create with values above
+
+# C3: Clone, configure, install
+rm -rf /home/kiwiton/apps/$SVC
+cd /home/kiwiton/apps
+TOKEN=$(~/bin/kti-github-token)
+git clone https://x-access-token:${TOKEN}@github.com/KiwiTon-Tech/$SVC.git
+cd $SVC
+git remote set-url origin https://github.com/KiwiTon-Tech/$SVC.git
+git checkout -- passenger_wsgi.py
+head -5 passenger_wsgi.py   # must show OUR docstring, not "imp.load_source"
+
+cp .env.example .env
+chmod 600 .env
+# Set SHARED_AUTH_TOKEN, PROD_DATABASE_URI, LOG_LEVEL (+ optional POLYGON_API_KEY) in .env
+
+source /home/kiwiton/virtualenv/apps/$SVC/3.11/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt   # private KTI-Strategies clone uses the B5 helper
+
+python passenger_wsgi.py    # should exit silently
+mkdir -p tmp && touch tmp/restart.txt
+```
+
+**C4:** cPanel → SSL/TLS Status → Run AutoSSL for `backtest.kiwiton-investments.com`
+
+**C5 Smoke test:**
+
+```bash
+curl https://backtest.kiwiton-investments.com/health
+# Expected: {"status":"ok"}
+
+curl https://backtest.kiwiton-investments.com/ready
+# Expected: {"status":"ready","detail":null,"db_configured":true,"db_reachable":true}
+# (status "degraded" with a detail string if PROD_DATABASE_URI is unset or Postgres is unreachable)
+
+# Authenticated (requires X-KTI-Token header):
+curl -H "X-KTI-Token: <SHARED_AUTH_TOKEN>" https://backtest.kiwiton-investments.com/strategies
+# Expected: JSON catalogue including sma_crossover, mltrader, cryptotrader, forextrader
+```
+
+**Worker cron (required — the API only enqueues jobs):**
+
+Backtests run out-of-process. Add a cron entry (cPanel → Cron Jobs) that
+spawns one ephemeral worker per tick. One entry per concurrency slot
+(cap is `MAX_CONCURRENT_BACKTESTS`, default 2):
+
+```cron
+* * * * * cd /home/kiwiton/apps/KTI-Backtest-Service && /home/kiwiton/virtualenv/apps/KTI-Backtest-Service/3.11/bin/python -m app.worker --max-jobs 1 >> ~/logs/backtest-worker.log 2>&1
+```
+
+Each tick claims at most one queued job (`SELECT ... FOR UPDATE SKIP
+LOCKED`), runs it, persists the result, and exits — no long-running
+daemon. Verify with `python -m app.worker --check` (loads config, exits 0).
+
+**C6 Subsequent deploys:**
+
+```bash
+kti-deploy KTI-Backtest-Service
+```
+
+**`.env` keys required on cPanel:**
+
+```
+SHARED_AUTH_TOKEN=<copy to KTI-Gateway as BACKTEST_SERVICE_TOKEN>
+PROD_DATABASE_URI=postgresql://...@localhost:5432/...?sslmode=disable
+LOG_LEVEL=INFO
+# Optional — improves stock-data accuracy; crypto/forex fall back to Yahoo:
+POLYGON_API_KEY=
+# Optional worker/concurrency tunables (defaults shown):
+# WORKER_MAX_JOBS=1
+# WORKER_MAX_RUNTIME_SECONDS=290
+# MAX_CONCURRENT_BACKTESTS=2
+```
+
+> ⚠️ Copy `SHARED_AUTH_TOKEN` into the **KTI-Gateway** `.env` as
+> `BACKTEST_SERVICE_TOKEN` so the gateway can authenticate its proxy calls.
+
+---
+
+## Part E: shared packages (not deployed)
+
+Some `KTI-*` repos are **pip packages, not services** — they ship Python
+code that other services `import` in-process, so they are consumed via
+`git+https` rather than rsynced to cPanel and run under Passenger.
+
+### KTI-Strategies
+
+| Field | Value |
+|-------|-------|
+| Repo | `KiwiTon-Tech/KTI-Strategies` (private) |
+| Type | pip package (`kti-strategies`) |
+| Consumed by | `KTI-Backtest-Service`, `KTI-Strategy-Engine` |
+| cPanel app? | **No** — never deployed, no Passenger, no venv of its own |
+| DNS / AutoSSL? | None |
+
+Holds the production Lumibot `Strategy` subclasses (`MLTrader`,
+`CryptoTrader`, `ForexTrader`). Lumibot needs the actual class object to
+run, so the code is shared as a package — you cannot put a `Strategy`
+behind HTTP. Consumers pin it in `requirements.txt`:
+
+```txt
+git+https://github.com/KiwiTon-Tech/KTI-Strategies.git@main#egg=kti-strategies
+```
+
+**CI:** uses the same reusable `python-cpanel.yml` but with
+`deploy_enabled: false`, so only the lint + test job runs — the deploy /
+rsync / Passenger-restart job is skipped entirely. `app_path` and
+`passenger_app` are intentionally omitted.
+
+> ⚠️ **Never** give a package repo a real `app_path`. The `deploy` job runs
+> `rsync -avz --delete ./ …:<app_path>/`, so a stray `app_path` pointing at
+> another service's directory would **wipe that live service** on the next
+> push to `main`. Package repos must set `deploy_enabled: false`.
+
+**Releasing a change** (no deploy step — consumers pull on their next
+install):
+
+1. Merge to `main` in `KTI-Strategies`.
+2. Bump the version pin (or re-pin `@main`) in each consumer's
+   `requirements.txt`.
+3. Redeploy the **consumers** (`kti-deploy KTI-Backtest-Service`, etc.) —
+   their `pip install -r requirements.txt` re-clones the updated package
+   using the B5 credential helper.
+
+> **`deploy_enabled` toggle.** Added to `python-cpanel.yml` for exactly this
+> case: `true` (default) keeps the full lint→test→deploy pipeline for
+> services; `false` runs lint+test only for package repos. The cPanel
+> secrets (`CPANEL_HOST`/`USER`/`SSH_KEY`) are optional at the workflow
+> contract level so a package repo without them can still call the workflow.
