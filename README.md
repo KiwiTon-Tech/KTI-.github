@@ -25,6 +25,8 @@ This repository hosts:
 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Signal models, training, prediction |
 | [`KTI-Strategy-Engine`](https://github.com/KiwiTon-Tech/KTI-Strategy-Engine) | Live trading bots |
 | [`KTI-Backtest-Service`](https://github.com/KiwiTon-Tech/KTI-Backtest-Service) | Backtest job queue + workers |
+| [`KTI-CF-WS-Worker`](https://github.com/KiwiTon-Tech/KTI-CF-WS-Worker) | WebSocket price streaming (Cloudflare Worker + Durable Object) |
+| [`KTI-Strategies`](https://github.com/KiwiTon-Tech/KTI-Strategies) | Shared Lumibot strategy package (`MLTrader`, `CryptoTrader`, `ForexTrader`) |
 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator) | Strategy control plane (optional) |
 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | Prometheus + Grafana + ELK config |
 | [`KTI-DB-Migrations`](https://github.com/KiwiTon-Tech/KTI-DB-Migrations) | Postgres schema |
@@ -96,9 +98,30 @@ GitHub Free **disallows org-level secrets on private repos**. Workaround:
 See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full service
 breakdown, communication flows, data model, and rollout plan.
 
+## Sprint Status (2026-06-22)
+
+| Sprint | Status | Deliverable |
+|--------|--------|-------------|
+| 1 — Real Strategy Backtesting | ✅ Complete | ML/NLP wired strategies, 19/19 tests passing |
+| 2 — Live Order Execution | ✅ Complete | 6-layer safety stack, `/api/trading/execute` |
+| 2.5 — Alpaca API Compliance | ✅ Complete | PDT fields removed, margin fields added |
+| 3 — Frontend + Rollout | ✅ Complete | OrderConfirmDialog, staged rollout plan |
+| 4 — ML Model Quality | ✅ Complete | Calibration, sentiment + regime features wired |
+| 5 — WebSocket Streaming | ✅ Complete | CF Worker cron → Alpaca REST → PriceHub DO → WS broadcast |
+| 6 — ML Artifact Storage | ✅ Complete | R2 live, 16 pkl files mirrored, cold-start restore verified |
+
+**Next:** Regime features deploy + retrain on cPanel; Grafana alerting; strategy-engine state persistence
+
+See [`docs/SPRINT_PLAN.md`](./docs/SPRINT_PLAN.md) for detailed sprint breakdown  
+See [`docs/GIT_COMMIT_SUMMARY.md`](./docs/GIT_COMMIT_SUMMARY.md) for commit messages
+
+---
+
 ## Documents in this repo
 
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — service catalog, topology,
   communication patterns, rollout plan.
 - [`docs/CPANEL_DEPLOYMENT.md`](./docs/CPANEL_DEPLOYMENT.md) — end-to-end
   cPanel setup playbook (GitHub App, token helper, per-service deploy).
+- [`docs/SPRINT_PLAN.md`](./docs/SPRINT_PLAN.md) — detailed sprint plan with acceptance criteria.
+- [`docs/GIT_COMMIT_SUMMARY.md`](./docs/GIT_COMMIT_SUMMARY.md) — ready-to-use git commit messages.

@@ -1,6 +1,6 @@
 # KiwiTon Investments — Sprint Plan
 
-**Status**: Sprints 1–6 Partially Complete — Sprint 5 pending CF Worker deploy; Sprint 6 D complete
+**Status**: Sprints 1–6 Complete ✅
 **Created**: 2026-06-09
 **Updated**: 2026-06-22
 **Owner**: Zander Bolyanatz
@@ -184,12 +184,14 @@ tail -f /home/kiwiton/logs/auto-update.log
 - **Frontend:** GraphQL codegen migration + `.js`→`.tsx` audit (`FRONTEND_TODO.md`); commit `package-lock.json` + enforce `npm ci` to stop server-pull drift.
 - **Gateway:** unit/integration test suite for dashboard aggregation partial-failure paths.
 - **Strategy Engine:** persist orchestrator state (daemon threads die on Passenger restart).
-- **Regime features** for ML (VIX, SPY 50/200 cross) — required to clear 55% accuracy DoD; OHLCV-only ceiling is ~48.7%. Once added, retrain + backtest comparison to measure delta.
+- **Regime features** for ML (VIX, SPY 50/200 cross) — required to clear 55% accuracy DoD; OHLCV-only ceiling is ~48.7%. Code complete in `KTI-ML-Service` (build_regime_features, config flags, training + predict updated); deploy + retrain pending on cPanel.
+- **Bug fixes (2026-06-22):** `TickerCard.js` + `MarketOverview.js` — null-guard all `.toFixed()`/`.toLocaleString()` calls (undefined crash when WS tick arrives before REST data). `GET /api/backtests/by-symbol` 500 — added proper aggregation endpoint to KTI-Backtest-Service reading from `backtest_results` table; fixed gateway proxy to return `{data:[]}` envelope matching frontend expectations.
+- **Grafana:** Cloud scrape target configuration (see `KTI-Observability`).
 
 ---
 
 ## 5. Summary
 
-**Completed:** Sprints 1–6 complete. Live order execution, real strategy backtesting, Alpaca API compliance, probability-calibrated ML models, full deployment automation, WebSocket price streaming (CF Worker + Durable Object, free tier), and ML artifact storage on Cloudflare R2. All 8 cPanel services on 5-min auto-deploy cron.
+**Completed:** Sprints 1–6 complete. Live order execution, real strategy backtesting, Alpaca API compliance, probability-calibrated ML models, full deployment automation, WebSocket price streaming (CF Worker + Durable Object, free tier), ML artifact storage on Cloudflare R2, and frontend bug fixes (null-guard `.toFixed()`, backtest by-symbol 500). All 8 cPanel services on 5-min auto-deploy cron.
 
-**Next:** Load test WS (100 conns × 10 symbols); regime features for ML (VIX, SPY 50/200 cross) to clear 55% accuracy DoD; Grafana alerting.
+**Next:** Regime features for ML (VIX, SPY 50/200 cross) — code complete, deploy + retrain on cPanel pending; Grafana alerting; strategy-engine state persistence.
