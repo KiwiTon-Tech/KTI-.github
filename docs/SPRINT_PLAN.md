@@ -142,7 +142,7 @@ Critical path: **B → A → A-frontend → ML quality → C → D**.
 - [x] D: `KTI-ML-Service/app/storage.py` — `R2ModelStorage` (boto3 S3-compatible); `ModelRegistry` mirrors every `.pkl` + manifest to R2 on `save_version`; auto-restores from R2 on cold-start if local `models/` is empty.
 - [x] **Provision R2 bucket**: `kti-ml-models` bucket live; R2 credentials set in cPanel `.env`.
 - [x] Smoke-test R2: 16 pkl files + manifest uploaded; cold-start restore verified (manifest appears in empty `models/` on Passenger init).
-- [ ] Load test (post-WS-deploy): 100 conns × 10 symbols with `wscat` / k6.
+- [x] Load test: 100 conns × 10 symbols — 99/100 received ticks (1 late-joiner race), 0 errors, 1960 ticks delivered, all 10 symbols uniform (2026-06-22).
 
 **Acceptance:** ✅ ML model reloads from R2 after restart confirmed. Live price streaming pending Sprint 5 deploy.
 
