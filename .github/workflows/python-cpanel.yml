@@ -134,6 +134,8 @@ jobs:
             --exclude '.env.local' \
             --exclude 'tests' \
             --exclude 'node_modules' \
+            --exclude 'models' \
+            --exclude 'models-backup*' \
             ./ ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:${{ inputs.app_path }}/
 
       - name: Sync .env to server
@@ -164,9 +166,11 @@ jobs:
           ssh ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }} bash -lc "'
             set -e
             cd ${{ inputs.app_path }}
-            VENV=\$(ls -d \$HOME/virtualenv${{ inputs.app_path }}/${{ inputs.python_version }} 2>/dev/null | head -n 1)
-            if [ -z \"\$VENV\" ]; then
-              echo \"No virtualenv found for ${{ inputs.app_path }} at \$HOME/virtualenv${{ inputs.app_path }}/${{ inputs.python_version }}\"
+            APP_REL="${{ inputs.app_path }}"
+            APP_REL="\${APP_REL#\$HOME/}"
+            VENV="\$HOME/virtualenv/\$APP_REL/${{ inputs.python_version }}"
+            if [ ! -d \"\$VENV\" ]; then
+              echo \"No virtualenv found at \$VENV\"
               echo \"Create the Python App in cPanel first.\"
               exit 1
             fi
