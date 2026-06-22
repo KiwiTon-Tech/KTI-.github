@@ -13,20 +13,32 @@ LOCK_FILE="/tmp/kti-auto-update.lock"
 # KTI-DB is excluded (usually needs manual migration coordination)
 SERVICES=(
     "KTI-Gateway"
+    "KTI-Broker-Service"
+    "KTI-Market-Data-Service"
+    "KTI-News-Sentiment-Service"
+    "KTI-NLP-Service"
+    "KTI-Backtest-Service"
+    "KTI-Strategy-Engine"
+    "KTI-Observability"
     "KTI-ML-Service"
-    # Add more services as they get deploy.sh:
-    # "KTI-Broker-Service"
-    # "KTI-Market-Data-Service"
-    # "KTI-News-Sentiment-Service"
-    # "KTI-NLP-Service"
-    # "KTI-Strategy-Engine"
-    # "KTI-Backtest-Service"
+    # Excluded — not cPanel Passenger apps:
+    # "KTI-DB"             (manual migration coordination)
+    # "KTI-CF-WS-Worker"   (Cloudflare Worker — deploy via wrangler)
+    # "KTI-Price-Publisher" (Fly.io — deploy via fly deploy)
+    # "KTI-Strategies"     (pip package — consumed via git+https)
 )
 
-# Branch to track for each service (default: main)
+# Branch to track for each service (all production services use main)
 declare -A SERVICE_BRANCHES
 SERVICE_BRANCHES=(
     ["KTI-Gateway"]="main"
+    ["KTI-Broker-Service"]="main"
+    ["KTI-Market-Data-Service"]="main"
+    ["KTI-News-Sentiment-Service"]="main"
+    ["KTI-NLP-Service"]="main"
+    ["KTI-Backtest-Service"]="main"
+    ["KTI-Strategy-Engine"]="main"
+    ["KTI-Observability"]="main"
     ["KTI-ML-Service"]="main"
 )
 
