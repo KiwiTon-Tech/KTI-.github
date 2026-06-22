@@ -106,9 +106,16 @@ update_service() {
     
     cd "$service_path"
     
-    # Check if deploy.sh exists
+    # Bootstrap: if deploy.sh is missing, pull latest code first so we get it
     if [ ! -f "${service_path}/deploy.sh" ]; then
-        log "⚠️ ${service} missing deploy.sh - skipping"
+        log "deploy.sh not found locally — bootstrapping git pull for ${service}..."
+        git fetch origin "$branch" 2>&1 | tee -a "$UPDATE_LOG" || true
+        git reset --hard "origin/${branch}" 2>&1 | tee -a "$UPDATE_LOG" || true
+    fi
+
+    # Check if deploy.sh exists (after potential bootstrap pull)
+    if [ ! -f "${service_path}/deploy.sh" ]; then
+        log "⚠️ ${service} missing deploy.sh even after pull - skipping"
         return 1
     fi
     
