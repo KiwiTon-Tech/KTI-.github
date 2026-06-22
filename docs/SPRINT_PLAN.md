@@ -71,7 +71,7 @@ Critical path: **B → A → A-frontend → ML quality → C → D**.
 
 **Before September 22, 2026:**
 - [x] Migrate `easy_to_borrow` → `borrow_status` in asset serializer (boolean → enum)
-- [ ] Add `margin_requirement_long`/`margin_requirement_short` to assets schema (future)
+- [x] Add `margin_requirement_long`/`margin_requirement_short` to assets schema + serializer (2026-06-22)
 
 **Documentation:**
 - [x] `docs/ALPACA_OPENAPI_3.0_AUDIT.md` — Full audit report with deadlines
