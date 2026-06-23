@@ -71,6 +71,16 @@ write_credentials() {
 
 # ── Update all service repo remote URLs ──────────────────────────────────────
 
+update_git_insteadof() {
+    local token="$1"
+    # Rewrites ALL https://github.com/ calls (including pip git clone) to use the token.
+    # Remove any old github.com insteadOf entries first, then set fresh one.
+    git config --global --unset-all "url.https://github.com/.insteadOf" 2>/dev/null || true
+    git config --global \
+        "url.https://x-access-token:${token}@github.com/.insteadOf" \
+        "https://github.com/"
+}
+
 update_remotes() {
     local token="$1"
     local base="/home/kiwiton/apps"
@@ -99,6 +109,7 @@ update_remotes() {
 JWT=$(make_jwt)
 TOKEN=$(get_token "$JWT")
 write_credentials "$TOKEN"
+update_git_insteadof "$TOKEN"
 update_remotes "$TOKEN"
 
-echo "[${TS}] ✅ GitHub App token refreshed + remote URLs updated (expires ~1h)"
+echo "[${TS}] ✅ GitHub App token refreshed + git insteadOf + remote URLs updated (expires ~1h)"
