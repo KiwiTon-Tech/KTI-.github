@@ -69,10 +69,36 @@ write_credentials() {
     chmod 600 "$CREDS_PATH"
 }
 
+# ── Update all service repo remote URLs ──────────────────────────────────────
+
+update_remotes() {
+    local token="$1"
+    local base="/home/kiwiton/apps"
+    local org="KiwiTon-Tech"
+    local repos=(
+        KTI-Gateway
+        KTI-Broker-Service
+        KTI-Market-Data-Service
+        KTI-News-Sentiment-Service
+        KTI-NLP-Service
+        KTI-Backtest-Service
+        KTI-Strategy-Engine
+        KTI-ML-Service
+    )
+    for repo in "${repos[@]}"; do
+        local repo_path="${base}/${repo}"
+        if [ -d "${repo_path}/.git" ]; then
+            git -C "$repo_path" remote set-url origin \
+                "https://x-access-token:${token}@github.com/${org}/${repo}.git"
+        fi
+    done
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 JWT=$(make_jwt)
 TOKEN=$(get_token "$JWT")
 write_credentials "$TOKEN"
+update_remotes "$TOKEN"
 
-echo "[${TS}] ✅ GitHub App token refreshed (expires ~1h)"
+echo "[${TS}] ✅ GitHub App token refreshed + remote URLs updated (expires ~1h)"
