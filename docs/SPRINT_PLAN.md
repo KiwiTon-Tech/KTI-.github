@@ -1,8 +1,8 @@
 # KiwiTon Investments — Sprint Plan
 
-**Status**: Sprints 1–6 Complete ✅
+**Status**: Sprints 1–7 In Progress 🚧
 **Created**: 2026-06-09
-**Updated**: 2026-06-22
+**Updated**: 2026-07-08
 **Owner**: Zander Bolyanatz
 
 This plan captures the remaining work to finish **Phase 7** (critical backend & trading infrastructure) plus model-quality and tech-debt items, based on a full repo audit. It supersedes the planning sections of `PHASE_7_IMPLEMENTATION_PLAN.md` with verified code state.
@@ -146,6 +146,22 @@ Critical path: **B → A → A-frontend → ML quality → C → D**.
 
 **Acceptance:** ✅ ML model reloads from R2 after restart confirmed. Live price streaming pending Sprint 5 deploy.
 
+### Sprint 7 — ML Regime Features + Accuracy Validation 🚧 IN PROGRESS
+
+*Started: 2026-07-08*
+
+- [x] Fix `spy_above_200ma` NaN propagation bug — first 200 warmup bars were returning `0.0` (false bearish) instead of NaN; `_merge_regime_frame` now correctly fills with neutral `0.5` default.
+- [x] Extend `lookback_days`: 730 → 1095 (3 years) — clean training samples increased from ~452 to ~703 per symbol (+56%).
+- [x] Add regime diagnostics logging — training now logs `%d/%d rows have real SMA200 data` per symbol.
+- [x] Fix `refresh-github-token.sh` `update_git_insteadof` — stale token entries were accumulating; now strips all `[url "...github.com..."]` sections before writing fresh token.
+- [x] Add `*/55 * * * *` token refresh cron to production cPanel.
+- [ ] Retrain all 26 symbols with fixes — **in progress** (started 2026-07-08T14:47 UTC, ~90 min).
+- [ ] Measure accuracy delta vs June 23 baseline (~43-44%) — pending retrain completion.
+- [ ] Use backtester to validate Sharpe delta on MLTrader strategy.
+- [ ] Post-sprint: expand symbol list with `XLK`, `TLT` + 4 sector ETFs.
+
+**Acceptance:** Accuracy ≥ 48.7% (OHLCV-only ceiling) on majority of symbols; 55% DoD for at least SPY/AAPL.
+
 ---
 
 ## 3. Infrastructure & DevOps (Deployment Automation Complete)
@@ -184,7 +200,7 @@ tail -f /home/kiwiton/logs/auto-update.log
 - **Frontend:** GraphQL codegen migration + `.js`→`.tsx` audit (`FRONTEND_TODO.md`); commit `package-lock.json` + enforce `npm ci` to stop server-pull drift.
 - **Gateway:** unit/integration test suite for dashboard aggregation partial-failure paths.
 - **Strategy Engine:** persist orchestrator state (daemon threads die on Passenger restart).
-- **Regime features** for ML (VIX, SPY 50/200 cross) — required to clear 55% accuracy DoD; OHLCV-only ceiling is ~48.7%. Code complete in `KTI-ML-Service` (build_regime_features, config flags, training + predict updated); deploy + retrain pending on cPanel.
+- **Regime features** for ML — Sprint 7 in progress; NaN bug fixed, lookback extended to 1095d, retrain running (2026-07-08).
 - **Bug fixes (2026-06-22):** `TickerCard.js` + `MarketOverview.js` — null-guard all `.toFixed()`/`.toLocaleString()` calls (undefined crash when WS tick arrives before REST data). `GET /api/backtests/by-symbol` 500 — added proper aggregation endpoint to KTI-Backtest-Service reading from `backtest_results` table; fixed gateway proxy to return `{data:[]}` envelope matching frontend expectations.
 - **Grafana:** Cloud scrape target configuration (see `KTI-Observability`).
 
@@ -192,6 +208,8 @@ tail -f /home/kiwiton/logs/auto-update.log
 
 ## 5. Summary
 
-**Completed:** Sprints 1–6 complete. Live order execution, real strategy backtesting, Alpaca API compliance, probability-calibrated ML models, full deployment automation, WebSocket price streaming (CF Worker + Durable Object, free tier), ML artifact storage on Cloudflare R2, and frontend bug fixes (null-guard `.toFixed()`, backtest by-symbol 500). All 8 cPanel services on 5-min auto-deploy cron.
+**Completed:** Sprints 1–6 complete. Live order execution, real strategy backtesting, Alpaca API compliance, probability-calibrated ML models, full deployment automation, WebSocket price streaming (CF Worker + Durable Object, free tier), ML artifact storage on Cloudflare R2, and frontend bug fixes. All 8 cPanel services on 5-min auto-deploy cron.
 
-**Next:** Regime features for ML (VIX, SPY 50/200 cross) — code complete, deploy + retrain on cPanel pending; Grafana alerting; strategy-engine state persistence.
+**In Progress:** Sprint 7 — ML regime features (NaN bug fixed, lookback 1095d, retrain running). Sprint 8 — Observability + alerting.
+
+**Next:** Sprint 8 (Grafana alerting, service health monitoring); Sprint 9 (Strategy Engine state persistence); Sprint 10 (live trading staged rollout).
