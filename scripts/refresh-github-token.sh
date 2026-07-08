@@ -74,8 +74,20 @@ write_credentials() {
 update_git_insteadof() {
     local token="$1"
     # Rewrites ALL https://github.com/ calls (including pip git clone) to use the token.
-    # Remove any old github.com insteadOf entries first, then set fresh one.
-    git config --global --unset-all "url.https://github.com/.insteadOf" 2>/dev/null || true
+    # Strip ALL existing [url "...github.com..."] sections from .gitconfig first —
+    # a simple --unset-all can't match because the section key contains the old token.
+    local git_config="${HOME}/.gitconfig"
+    if [ -f "$git_config" ]; then
+        python3 - "$git_config" <<'PYEOF'
+import sys, re
+path = sys.argv[1]
+with open(path) as f:
+    text = f.read()
+text = re.sub(r'\[url "[^"]*github\.com[^"]*"\][^\[]*', '', text)
+with open(path, 'w') as f:
+    f.write(text)
+PYEOF
+    fi
     git config --global \
         "url.https://x-access-token:${token}@github.com/.insteadOf" \
         "https://github.com/"
