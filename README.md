@@ -109,8 +109,9 @@ breakdown, communication flows, data model, and rollout plan.
 | 4 — ML Model Quality | ✅ Complete | Calibration, sentiment + regime features wired |
 | 5 — WebSocket Streaming | ✅ Complete | CF Worker cron → Alpaca REST → PriceHub DO → WS broadcast |
 | 6 — ML Artifact Storage | ✅ Complete | R2 live, 16 pkl files mirrored, cold-start restore verified |
+| 9 — Strategy Engine State Persistence | ✅ Complete | JSON snapshots and safe strategy restoration after Passenger restart |
 
-**Next:** Regime features deploy + retrain on cPanel; Grafana alerting; strategy-engine state persistence
+**Next:** Regime-feature validation; Grafana alerting; staged live-trading rollout
 
 See [`docs/SPRINT_PLAN.md`](./docs/SPRINT_PLAN.md) for detailed sprint breakdown  
 See [`docs/GIT_COMMIT_SUMMARY.md`](./docs/GIT_COMMIT_SUMMARY.md) for commit messages

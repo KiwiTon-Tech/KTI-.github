@@ -210,6 +210,8 @@ tail -f /home/kiwiton/logs/auto-update.log
 
 **Completed:** Sprints 1–6 complete. Live order execution, real strategy backtesting, Alpaca API compliance, probability-calibrated ML models, full deployment automation, WebSocket price streaming (CF Worker + Durable Object, free tier), ML artifact storage on Cloudflare R2, and frontend bug fixes. All 8 cPanel services on 5-min auto-deploy cron.
 
-**In Progress:** Sprint 7 — ML regime features (NaN bug fixed, lookback 1095d, retrain running). Sprint 8 — Observability + alerting.
+**In Progress:** Sprint 7 — ML regime features (NaN bug fixed, lookback 1095d, retrain validation pending). Sprint 8 — Observability + alerting.
 
-**Next:** Sprint 8 (Grafana alerting, service health monitoring); Sprint 9 (Strategy Engine state persistence); Sprint 10 (live trading staged rollout).
+**Implemented:** Sprint 9 — Strategy Engine state persistence (JSON snapshots and safe strategy restoration after Passenger restart).
+
+**Next:** Sprint 8 (Grafana alerting, service health monitoring); Sprint 10 (live trading staged rollout).
