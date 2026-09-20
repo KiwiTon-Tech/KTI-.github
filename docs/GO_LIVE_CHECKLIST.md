@@ -74,6 +74,21 @@ live runner is built** (Track B below).
 
 ---
 
+## Track A′ — Infra issues found during the 2026-09-20 server C5 attempt
+
+- [ ] **`deploy.sh` treats pip failures as success** — `pip install -r
+      requirements.txt` failed to clone kti-strategies (dead GitHub token)
+      and the deploy still reported "✅ Deployment successful", leaving the
+      OLD strategy code installed. Make deploy abort loudly when pip fails.
+- [ ] **`refresh-github-token.sh` cron is stale/broken** — HTTPS GitHub ops
+      on cPanel fail auth ("Invalid username or token"). Verify the */55
+      cron actually runs and updates insteadOf entries; consider switching
+      requirements pins to `git+ssh://` (deploys already use SSH).
+- [ ] Auto-deploy pulls caused silent dep drift before — add a post-deploy
+      assert (e.g. `pip show kti-strategies` commit hash vs GitHub main).
+
+---
+
 ## Track B — Automated Live Strategies (the bots)
 
 > Manual UI orders work today (Track A). This track makes `CryptoTrader` /
