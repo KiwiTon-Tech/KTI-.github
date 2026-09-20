@@ -22,12 +22,11 @@ order execution frontend (`TradeTicket` + `OrderConfirmDialog`).
 was last updated that day — results were never recorded. Sprint 8 (Grafana
 alerting) is not done. Sprint 10 (live trading staged rollout) is this week.
 
-**Critical gap found in audit:**
-`KTI-Strategy-Engine` has **no live strategy runners**. Nothing in that repo
-imports `kti_strategies` or Lumibot — the orchestrator registers placeholder
-entries with `instance=None` and logs *"register it first"* on start. Manual
-orders via the UI work today; **automated strategies cannot trade live until a
-live runner is built** (Track B below).
+**Critical gap found in audit — CLOSED 2026-09-20 (Track B1):**
+`KTI-Strategy-Engine` had **no live strategy runners**. The live runner
+(`app/live_runner.py`) now builds Lumibot strategies against Alpaca from
+`config/live_strategies.yaml` and registers them with the orchestrator at
+boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
 
 ---
 
@@ -76,14 +75,15 @@ live runner is built** (Track B below).
 
 ## Track A′ — Infra issues found during the 2026-09-20 server C5 attempt
 
-- [ ] **`deploy.sh` treats pip failures as success** — `pip install -r
-      requirements.txt` failed to clone kti-strategies (dead GitHub token)
-      and the deploy still reported "✅ Deployment successful", leaving the
-      OLD strategy code installed. Make deploy abort loudly when pip fails.
+- [x] **`deploy.sh` treats pip failures as success** — ROOT CAUSE found
+      2026-09-20: `pip ... | tee -a log || error` without `pipefail` returns
+      tee's exit code, so every pip failure was masked. Fixed in Backtest-
+      Service and Strategy-Engine deploy.sh (`set -o pipefail`). Other
+      services' deploy.sh need the same line — audit on next deploy.
 - [ ] **`refresh-github-token.sh` cron is stale/broken** — HTTPS GitHub ops
       on cPanel fail auth ("Invalid username or token"). Verify the */55
-      cron actually runs and updates insteadOf entries; consider switching
-      requirements pins to `git+ssh://` (deploys already use SSH).
+      cron actually runs and updates insteadOf entries. migration started:
+      new pins use `git+ssh://` (KTI-Strategy-Engine requirements).
 - [ ] Auto-deploy pulls caused silent dep drift before — add a post-deploy
       assert (e.g. `pip show kti-strategies` commit hash vs GitHub main).
 
@@ -94,10 +94,20 @@ live runner is built** (Track B below).
 > Manual UI orders work today (Track A). This track makes `CryptoTrader` /
 > `MLTrader` run unattended.
 
-- [ ] **B1.** Build live runner in `KTI-Strategy-Engine`: instantiate
-      `kti_strategies` Lumibot strategies with the Alpaca broker config and
-      call `orchestrator.register_strategy()` on boot, so persisted state
-      (Sprint 9 JSON snapshots) auto-starts previously-running strategies.
+- [x] **B1.** Live runner built (2026-09-20): `KTI-Strategy-Engine/app/live_runner.py`
+      — `config/live_strategies.yaml` drives per-strategy build+register at
+      boot; gated by `LIVE_RUNNER_ENABLED`. One Lumibot `Trader` per
+      strategy; `is_running=False` → `trader.stop_all()`; heartbeats wired
+      via an `on_trading_iteration` wrapper (never `initialize` — lumibot
+      drops params through `getfullargspec`). Alpaca paper by default.
+      **Also fixed a production deadlock**: `register_strategy()` held
+      `_lock` while `_persist()` re-acquired it — any registration hung
+      forever (nothing had ever called it before). Now `RLock`.
+- [ ] **B1-ops.** Server prerequisites before enabling: add
+      `ALPACA_API_KEY`/`ALPACA_API_SECRET`/`ALPACA_PAPER=true` and
+      `LIVE_RUNNER_ENABLED=true` to the Strategy-Engine env; verify the
+      engine's venv has lumibot/nodeps installed (deploy.sh now handles
+      `requirements-nodeps.txt`).
 - [ ] **B2.** Register `CryptoTrader` on BTC/USD only, paper broker, small
       capital_pct; verify heartbeat, restart-on-crash, and kill-switch halt.
 - [ ] **B3.** Add heartbeat metric + Grafana alert for crashed strategies.
