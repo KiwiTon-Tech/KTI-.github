@@ -93,6 +93,10 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       username or token" pip failures that broke the ML-Service deploy).
 - [ ] Auto-deploy pulls caused silent dep drift before — add a post-deploy
       assert (e.g. `pip show kti-strategies` commit hash vs GitHub main).
+- [ ] `/home/kiwiton/bin/auto-update.sh` is an OLDER build than
+      `KTI-.github/scripts/auto-update.sh` (different log format; works but
+      diverged). Reconcile when calm: back up bin copy, reinstall from repo
+      via `install-deployment-automation.sh`.
 
 ---
 
