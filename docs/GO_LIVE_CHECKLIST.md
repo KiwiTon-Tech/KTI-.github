@@ -207,8 +207,18 @@ Read-out:
   on the server) and full-history data (Alpaca crypto bars — our Polygon
   plan only serves trailing ~2y). Run C5 server-side via the live Backtest
   Service instead of locally.
-- [ ] Server-side C5 with `use_ml=True` + Alpaca full-history crypto data.
-      Harness ready (2026-09-20): on the cPanel box —
+**Production run 2026-09-20 — FAILED on all 7 symbols** (Alpaca 3y,
+use_ml=True, live `/predict` per bar, zero service errors):
+BTC 3t −1.27R · ETH 3t −0.32R · SOL 1t −1.60R · AVAX 2t −1.49R ·
+LINK 4t +0.03R · DOT 3t −1.60R · LTC 1t −1.21R; max DD ≤ 4.7% everywhere.
+Risk containment held (worst loss 1.6R); the failure is trade FREQUENCY
+(1–4 trades in ~2.5 active years) with negative drift after 10bps fees.
+**Verdict: do NOT enable live automated crypto trading on this config.**
+Next: signal-distribution probe (is the model even saying buy?), then
+either deliberate threshold change or 4h/1h timeframe work.
+
+- [x] Server-side C5 with `use_ml=True` + Alpaca full-history crypto data.
+      Harness command for rerun: on the cPanel box —
       ```bash
       cd /home/kiwiton/apps/KTI-Backtest-Service
       set -a; source .env; set +a   # ML_SERVICE_URL/TOKEN + ALPACA keys
