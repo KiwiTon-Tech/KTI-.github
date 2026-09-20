@@ -77,9 +77,11 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
 
 - [x] **`deploy.sh` treats pip failures as success** — ROOT CAUSE found
       2026-09-20: `pip ... | tee -a log || error` without `pipefail` returns
-      tee's exit code, so every pip failure was masked. Fixed in Backtest-
-      Service and Strategy-Engine deploy.sh (`set -o pipefail`). Other
-      services' deploy.sh need the same line — audit on next deploy.
+      tee's exit code, so every pip failure was masked. Fixed in all six
+      repos that have deploy.sh (Backtest, Strategy-Engine, Gateway, NLP,
+      News-Sentiment, ML-Service). NOTE: Broker-Service and
+      Market-Data-Service have no deploy.sh in the local checkout —
+      confirm how they deploy before next change there.
 - [ ] **`refresh-github-token.sh` cron is stale/broken** — HTTPS GitHub ops
       on cPanel fail auth ("Invalid username or token"). Verify the */55
       cron actually runs and updates insteadOf entries. migration started:
