@@ -1,8 +1,8 @@
 # KiwiTon Investments — Sprint Plan
 
-**Status**: Sprints 1–7 In Progress 🚧
+**Status**: Sprints 1–7 In Progress 🚧 · Crypto risk-model rewrite landed 2026-09-20
 **Created**: 2026-06-09
-**Updated**: 2026-07-08
+**Updated**: 2026-09-20
 **Owner**: Zander Bolyanatz
 
 This plan captures the remaining work to finish **Phase 7** (critical backend & trading infrastructure) plus model-quality and tech-debt items, based on a full repo audit. It supersedes the planning sections of `PHASE_7_IMPLEMENTATION_PLAN.md` with verified code state.
@@ -162,6 +162,24 @@ Critical path: **B → A → A-frontend → ML quality → C → D**.
 
 **Acceptance:** Accuracy ≥ 48.7% (OHLCV-only ceiling) on majority of symbols; 55% DoD for at least SPY/AAPL.
 
+### Sprint 11 — CryptoTrader Risk-Model Rewrite + C5 Validation Harness ✅ CODE COMPLETE (go-live gate pending)
+
+*Completed (code): 2026-09-20 · see `GO_LIVE_CHECKLIST.md` Track C for the full record*
+
+Go-live audit found `CryptoTrader` risked 25% of cash per trade with **no stop-loss or take-profit** — unacceptable for live capital. Rewritten around a 1R fixed-fractional framework:
+
+- [x] 1R sizing (`risk_pct=0.01`): `qty = risk$ / (entry − stop)`; structure stop at 10-bar swing low (software-managed; Alpaca crypto has no bracket orders).
+- [x] Trade management: partial TP at 2R (50%) → stop to break-even → trail under swing lows.
+- [x] Trend filter (`trend_sma=200`): longs above the SMA only; unknown history blocks entries, never exits.
+- [x] Confirmed RSI pullback fallback (`rsi_entry=40` + confirmation bar) replaces naked `RSI<30` knife-catching.
+- [x] R-multiple journaling (`trade_log` with entry/exit/qty/reason) + confluence snapshot at entry.
+- [x] Legacy `cash_at_risk` kept as deprecated notional-cap override (old configs don't crash). Registry defaults updated in `KTI-Backtest-Service`.
+- [x] 22 new unit tests (`tests/test_crypto_risk_model.py`); 41/41 green; ruff clean.
+- [x] **C5 local validation** (`KTI-Backtest-Service/scripts/c5_crypto_validation.py`, Polygon 2y, 10bps fees, `use_ml=False`): all 7 symbols **FAIL the gate on trade count** (0–3 round trips each — fallback too selective on daily bars) but **PASS risk containment** (max DD ≤ 4.4%, worst loss ≈ 1.3R). Not go-live evidence either way at this sample size.
+- [ ] **C5 production validation** (gate for live enablement): run server-side with `use_ml=True` + Alpaca 3y data — command documented in `GO_LIVE_CHECKLIST.md` §C5. Requires ML token + Alpaca keys (server-only).
+
+**Infra lessons folded into the harness + checklist:** `YahooDataBacktesting` rate-limits into silent empty data (use prefetched `PandasData`); Lumibot filters `initialize()` kwargs via `getfullargspec` (wrappers silently drop params); sequential backtests in one process contaminate each other (subprocess per symbol); Lumibot 3.8.16 ignores `trades_file` (reads its own `logs/` glob → stale-file risk).
+
 ---
 
 ## 3. Infrastructure & DevOps (Deployment Automation Complete)
@@ -214,4 +232,6 @@ tail -f /home/kiwiton/logs/auto-update.log
 
 **Implemented:** Sprint 9 — Strategy Engine state persistence (JSON snapshots and safe strategy restoration after Passenger restart).
 
-**Next:** Sprint 8 (Grafana alerting, service health monitoring); Sprint 10 (live trading staged rollout).
+**Sprint 11 (2026-09-20):** CryptoTrader 1R risk-model rewrite complete + C5 validation harness; go-live gated on server-side C5 run (`use_ml=True`, Alpaca 3y) — see `GO_LIVE_CHECKLIST.md`.
+
+**Next:** Sprint 8 (Grafana alerting, service health monitoring); Sprint 10 (live trading staged rollout); server-side C5.

@@ -204,7 +204,7 @@ All frontend API objects now have a live Gateway route. Below is the full `/api/
 - `GET   /api/trading/profiles` — list strategy profiles
 - `POST  /api/trading/profiles` — switch active profile
 - `GET   /api/trading/strategies/<id>/performance` — per-strategy P&L from trades table
-- `POST  /api/trading/execute` — ⚠️ **NOT YET WIRED** — live order submission; requires safety controls
+- `POST  /api/trading/execute` — live order submission with 6-layer safety stack (Sprint 2): paper-mode firewall (`LIVE_TRADING_ENABLED`), kill-switch, risk preflight (daily loss + concentration), idempotency, audit trail to `monitoring_events`
 
 **Costs** (`/api/costs/*` → `kti_db` transaction_costs)
 - `GET /api/costs/summary` — total costs, avg per trade, by asset class
