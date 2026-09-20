@@ -176,10 +176,13 @@ Read-out:
       ```bash
       cd /home/kiwiton/apps/KTI-Backtest-Service
       set -a; source .env; set +a   # ML_SERVICE_URL/TOKEN + ALPACA keys
-      nohup .venv/bin/python scripts/c5_crypto_validation.py \
+      PY=$(ls -d /home/kiwiton/virtualenv/apps/KTI-Backtest-Service/*/bin/python | head -1)
+      nohup "$PY" scripts/c5_crypto_validation.py \
           --source alpaca --ml --start 2023-09-21 --end 2026-09-19 \
           > logs/c5_ml_run.log 2>&1 &
       ```
+      (venv lives under `/home/kiwiton/virtualenv/apps/…`, not `.venv` —
+      first attempt exited 127 on this.)
       (~30–90 min/symbol, one point-in-time /predict per bar; results land
       in `scripts/c5_crypto_validation_results.json`.)
 - [ ] Consider a 4h/1h crypto timeframe later so the fallback's structure
