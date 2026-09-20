@@ -85,10 +85,12 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       pull - skipping"). Committed proper deploy.sh to both 2026-09-20.
 - [ ] Confirm the next auto-update cycle deploys Broker/Market-Data
       cleanly (first run will bootstrap them onto the cron).
-- [ ] **`refresh-github-token.sh` cron is stale/broken** — HTTPS GitHub ops
-      on cPanel fail auth ("Invalid username or token"). Verify the */55
-      cron actually runs and updates insteadOf entries. migration started:
-      new pins use `git+ssh://` (KTI-Strategy-Engine requirements).
+- [x] **`refresh-github-token.sh` dead — migrated instead of fixed**
+      (2026-09-20): all private-repo pip pins moved to `git+ssh://` in
+      Backtest, Broker, Gateway, ML, News-Sentiment, Strategy-Engine.
+      SSH auth is what deploys already use. The token cron can be retired
+      once nothing references it (also fixes the recurring "Invalid
+      username or token" pip failures that broke the ML-Service deploy).
 - [ ] Auto-deploy pulls caused silent dep drift before — add a post-deploy
       assert (e.g. `pip show kti-strategies` commit hash vs GitHub main).
 
