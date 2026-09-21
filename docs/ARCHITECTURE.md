@@ -541,17 +541,30 @@ market data and execute trades.
 **Exposes**: small control REST (`/status`, `/start`, `/stop`) consumed by
 the orchestrator / `KTI-Gateway`.
 
-#### 3.7.1 Live runner: documented Alpaca exception (Sprint 11, 2026-09-20)
+#### 3.7.1 Live runner: TEMPORARY Alpaca exception (Sprint 11, 2026-09-20)
+
+⚠️ **This exception is valid for the paper-testing period only. Do NOT
+extend it to real-money trading.**
 
 The live strategy runner (`app/live_runner.py`) constructs Lumibot's Alpaca
 broker **in-process**, which means this service holds `ALPACA_API_KEY` /
-`ALPACA_API_SECRET` — an explicit, blessed exception to the
+`ALPACA_API_SECRET` — a deliberate, time-boxed exception to the
 "only KTI-Broker-Service speaks to Alpaca" rule. Rationale: Lumibot live
 needs the broker in-process (order routing + stream lifecycle are
-inseparable from its Trader loop); every UI/manual flow still goes through
-Broker-Service REST, and all market-data reads stay on
-KTI-Market-Data-Service. Paper mode is the default (`ALPACA_PAPER=true`);
-live requires the staged rollout in GO_LIVE_CHECKLIST.md.
+inseparable from its Trader loop), and rebuilding that integration
+correctly is days of work that shouldn't block validating whether the
+strategy even works.
+
+**Expires when any of these is true:**
+1. Real-money keys could be enabled here (`ALPACA_PAPER=false`) — that
+   requires the exception to be REPLACED first by routing live orders
+   through KTI-Broker-Service REST (option B: a Lumibot HTTP broker
+   adapter, or option C: drop the Lumibot live loop for a REST-driven
+   one), or an explicit documented re-approval.
+2. The paper week disproves the approach (then delete the runner).
+
+Every UI/manual flow still goes through Broker-Service REST, and all
+market-data reads stay on KTI-Market-Data-Service — unchanged.
 
 ---
 

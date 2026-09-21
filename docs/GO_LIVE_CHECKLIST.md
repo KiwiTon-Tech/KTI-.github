@@ -125,8 +125,10 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       `ALPACA_API_KEY`/`ALPACA_API_SECRET`/`ALPACA_PAPER=true` and
       `LIVE_RUNNER_ENABLED=true` to the Strategy-Engine env; verify the
       engine's venv has lumibot/nodeps installed (deploy.sh now handles
-      `requirements-nodeps.txt`). Alpaca exception for this service is
-      blessed in ARCHITECTURE.md §3.7.1 + Broker-Service README.
+      `requirements-nodeps.txt`). **The Alpaca creds exception is
+      TIME-BOXED to the paper-validation window** (ARCHITECTURE.md §3.7.1):
+      it expires before any real money — live orders must then route
+      through KTI-Broker-Service REST or be explicitly re-approved.
 - [ ] **B2 (SOL paper week).** `crypto_sol` spec exists (hourly params,
       use_ml bias, 10% capital). Enable: set `enabled: true` in
       `config/live_strategies.yaml` on the server, restart the engine,
