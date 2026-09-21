@@ -293,6 +293,11 @@ either deliberate threshold change or 4h/1h timeframe work.
 
 ## Definition of Done — "Investing this week"
 
+**Reached 2026-09-21 (paper):** crypto_sol registered in the orchestrator
+on Alpaca paper (10% of $100k notional, hourly loop, 1R sizing). The week
+observes paper behavior; live money requires the Alpaca creds exception to
+be replaced first (ARCHITECTURE.md §3.7.1) plus a clean paper week.
+
 1. Track A complete: real (or paper) orders flow end-to-end with the full
    safety stack and alerting.
 2. Sprint 7 accuracy on record; strategy mode chosen per A1.
