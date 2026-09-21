@@ -125,9 +125,15 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       `ALPACA_API_KEY`/`ALPACA_API_SECRET`/`ALPACA_PAPER=true` and
       `LIVE_RUNNER_ENABLED=true` to the Strategy-Engine env; verify the
       engine's venv has lumibot/nodeps installed (deploy.sh now handles
-      `requirements-nodeps.txt`).
-- [ ] **B2.** Register `CryptoTrader` on BTC/USD only, paper broker, small
-      capital_pct; verify heartbeat, restart-on-crash, and kill-switch halt.
+      `requirements-nodeps.txt`). Alpaca exception for this service is
+      blessed in ARCHITECTURE.md §3.7.1 + Broker-Service README.
+- [ ] **B2 (SOL paper week).** `crypto_sol` spec exists (hourly params,
+      use_ml bias, 10% capital). Enable: set `enabled: true` in
+      `config/live_strategies.yaml` on the server, restart the engine,
+      `POST /orchestrator/start {"strategy": "crypto_sol"}`. Verify:
+      heartbeat advancing in `/orchestrator/status`, one iteration per
+      hour, kill-switch halts it, journal rows appear. Review R-multiples
+      daily for 1 week before any live consideration.
 - [ ] **B3.** Add heartbeat metric + Grafana alert for crashed strategies.
 - [ ] **B4.** Expand to remaining crypto symbols after 1 clean week.
 
