@@ -163,6 +163,26 @@ stops, partial profits + break-even, trail winners, ~40–55% win rate with
 - [ ] Same journal write into the `trades` table columns for LIVE trades
       when the live runner runs (Track B2).
 
+**Intraday hourly run 2026-09-21 (final matrix)** — Alpaca data,
+`timeframe=hour`, 10bps fees, $100k, use_ml=False. SOL was 3y
+(2023-09-21→2026-09-19); the rest are 2y (2024-09-21→2026-09-19) after
+cPanel LVE kills forced the shorter window:
+
+| Symbol | Trades | Win % | Exp/trade | Return | Max DD | Verdict |
+|---|---|---|---|---|---|---|
+| **SOL** | 52 | 63.5% | **+0.05R** | +3.9% | 3.2% | **PASS** |
+| BTC | 58 | 50.0% | −0.01R | −1.3% | 2.1% | FAIL |
+| ETH | 52 | 38.5% | −0.18R | −10.7% | 10.7% | FAIL |
+| AVAX | 58 | 43.1% | −0.09R | −5.7% | 8.5% | FAIL |
+| LINK | 44 | 34.1% | −0.22R | −10.6% | 10.9% | FAIL |
+| DOT | 38 | 28.9% | −0.29R | −10.0% | 10.0% | FAIL |
+| LTC | 56 | 37.5% | −0.19R | −10.0% | 10.3% | FAIL |
+
+Decision: **SOL-only** is the defensible strategy. Mid-caps bleed through
+stops in chop; BTC is fee-dragged flat. One winner out of seven risks
+being luck — treat SOL's PASS as a paper-trading candidate, not a live
+mandate: 1 week paper, then decide.
+
 ### C2. Entry quality (win-rate knob) — 🚧 PARTIAL 2026-09-20
 - [x] **Trend filter**: long entries only when close > `trend_sma` (200D
       default, 0 disables). Unknown trend (insufficient history) blocks
