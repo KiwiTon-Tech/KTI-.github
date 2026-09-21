@@ -97,6 +97,11 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       `KTI-.github/scripts/auto-update.sh` (different log format; works but
       diverged). Reconcile when calm: back up bin copy, reinstall from repo
       via `install-deployment-automation.sh`.
+- [ ] cPanel account has an LVE (per-account) process/memory cap, invisible
+      to ulimit: two 1-GB lumibot backtest workers = `fork: Resource
+      temporarily unavailable`. Keep heavy validation serial on that box;
+      the prod worker concurrency cap of 2 is fine for daily bars but 3y
+      hourly runs (~1GB RSS each) must be one-at-a-time.
 
 ---
 
