@@ -91,8 +91,10 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       SSH auth is what deploys already use. The token cron can be retired
       once nothing references it (also fixes the recurring "Invalid
       username or token" pip failures that broke the ML-Service deploy).
-- [ ] Auto-deploy pulls caused silent dep drift before — add a post-deploy
-      assert (e.g. `pip show kti-strategies` commit hash vs GitHub main).
+- [x] Post-deploy assert added (2026-09-20): Backtest + Strategy-Engine
+      deploy.sh now compare the installed kti-strategies dist-info commit
+      (direct_url.json) against `git ls-remote origin main` and abort on
+      drift, with a clear logged message.
 - [ ] `/home/kiwiton/bin/auto-update.sh` is an OLDER build than
       `KTI-.github/scripts/auto-update.sh` (different log format; works but
       diverged). Reconcile when calm: back up bin copy, reinstall from repo
@@ -155,8 +157,11 @@ stops, partial profits + break-even, trail winners, ~40–55% win rate with
 - [x] **R-multiple journaling**: every close appends `{qty, exit_price,
       r_multiple, reason}` to `trade_log` with confluence snapshot at entry.
       19 new unit tests in `tests/test_crypto_risk_model.py` (39/39 pass).
-- [ ] Persist `trade_log` R-multiples to the `trades` table journal columns
-      when the live runner lands (Track B).
+- [x] Backtest persistence slice (2026-09-20): job results jsonb now carry
+      `journal` — the strategy's R-multiple close events — so expectancy
+      analysis already works from backtest history.
+- [ ] Same journal write into the `trades` table columns for LIVE trades
+      when the live runner runs (Track B2).
 
 ### C2. Entry quality (win-rate knob) — 🚧 PARTIAL 2026-09-20
 - [x] **Trend filter**: long entries only when close > `trend_sma` (200D
