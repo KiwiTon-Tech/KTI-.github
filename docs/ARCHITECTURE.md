@@ -566,6 +566,38 @@ strategy even works.
 Every UI/manual flow still goes through Broker-Service REST, and all
 market-data reads stay on KTI-Market-Data-Service — unchanged.
 
+#### 3.7.2 Daemon-mode live runner + desired-state control (2026-09-22/27)
+
+Passenger recycles idle workers (5–35 min observed), so the trading loop
+cannot live in the web process. `LIVE_RUNNER_MODE=daemon` splits the
+service into two processes:
+
+- **Web (Passenger)** — serves the API. Its orchestrator holds only
+  placeholder entries restored from `state/orchestrator_state.json`;
+  `get_status()` overlays the shared store on every call so status always
+  reflects the daemon's truth.
+- **Daemon** — `scripts/run_live_daemon.py`, kept alive by
+  `scripts/live_watchdog.sh` on a `*/2` cron (pidfile-guarded). Owns the
+  real lumibot `LumibotLiveInstance`s and their threads.
+
+**Control channel:** because the web process can never hold a live
+instance, `/orchestrator/start`, `/stop`, and `/kill-switch` do NOT call
+orchestrator methods in daemon mode. They write desired state to
+`tmp/live_control.json` (e.g. `{"crypto_sol": {"desired": "running"},
+"__kill_switch__": {"desired": "active"}}`); the daemon calls
+`reconcile_controls()` every ~5s and applies it — kubernetes-style
+desired-vs-actual. API responses return `{"queued": [...], "mode":
+"daemon"}`; callers must poll `/status` ~5s later to confirm.
+
+**Venv integrity tripwire:** the watchdog also counts `.so` files declared
+in package RECORDs that no longer exist and logs `VENV INTEGRITY: N .so
+file(s) missing`. Added after a 2026-09-27 incident where binaries were
+stripped from 5 of 7 venvs post-install (see
+`LESSONS_LIVE_RUNNER_HOSTING.md` §7 — root cause unresolved).
+
+All six lifecycle lessons feeding this design are in
+`LESSONS_LIVE_RUNNER_HOSTING.md`.
+
 ---
 
 ### 3.8 `KTI-Backtest-Service`

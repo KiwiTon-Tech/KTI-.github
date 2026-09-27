@@ -217,7 +217,7 @@ tail -f /home/kiwiton/logs/auto-update.log
 
 - **Frontend:** GraphQL codegen migration + `.js`→`.tsx` audit (`FRONTEND_TODO.md`); commit `package-lock.json` + enforce `npm ci` to stop server-pull drift.
 - **Gateway:** unit/integration test suite for dashboard aggregation partial-failure paths.
-- **Strategy Engine:** persist orchestrator state (daemon threads die on Passenger restart).
+- ~~**Strategy Engine:** persist orchestrator state (daemon threads die on Passenger restart).~~ Done 2026-09: state store + daemon mode (`run_live_daemon.py` + watchdog, `tmp/live_control.json` desired-state channel — see ARCHITECTURE §3.7.2).
 - **Regime features** for ML — Sprint 7 in progress; NaN bug fixed, lookback extended to 1095d, retrain running (2026-07-08).
 - **Bug fixes (2026-06-22):** `TickerCard.js` + `MarketOverview.js` — null-guard all `.toFixed()`/`.toLocaleString()` calls (undefined crash when WS tick arrives before REST data). `GET /api/backtests/by-symbol` 500 — added proper aggregation endpoint to KTI-Backtest-Service reading from `backtest_results` table; fixed gateway proxy to return `{data:[]}` envelope matching frontend expectations.
 - **Grafana:** Cloud scrape target configuration (see `KTI-Observability`).
