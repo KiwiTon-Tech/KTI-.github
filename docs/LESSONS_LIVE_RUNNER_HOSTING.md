@@ -136,13 +136,14 @@ doesn't match freshly deployed code, check `ps` for a stale pool first.
 **Symptom:** daemon exited at boot; `import numpy` → "C-extensions
 failed"; then scipy `_sparsetools`, PIL `_imaging`, etc.
 
-**Cause:** unresolved. 36 `.so` files across 16 packages (SQLAlchemy,
-aiohttp, coincurve, cryptography, curl_cffi, duckdb, fonttools, greenlet,
-ijson, kiwisolver, lxml, matplotlib, msgpack, pillow, propcache, pyarrow)
-were missing while their `.py` files stayed intact — i.e. binaries were
-stripped *after* install. Disk was at 8%; other app venvs unaffected; no
-visible quarantine log. Working theory: host-level scanner quarantining
-binaries, or a filesystem/backup sync that dropped them.
+**Cause:** unresolved, but the full census showed it was broader than the
+first count: **5 of 7 venvs** had missing binaries, including bundled
+shared libs (`psycopg_binary.libs/libcrypto-*.so.3` /
+`libssl-*.so.3` in every venv carrying psycopg — Gateway and News weren't
+clean either). Disk at 8%; `.py` files all intact — binaries were
+stripped *after* install. Working theory: host-level scanner quarantining
+executables under `~/virtualenv`. If it recurs, escalate to the provider
+and ask specifically about `.so` quarantining in user home dirs.
 
 **Fix/monitoring:** force-reinstall restored it
 (`pip install --force-reinstall --no-cache-dir <pkgs>`). The watchdog now
