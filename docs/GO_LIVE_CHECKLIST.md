@@ -129,10 +129,19 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       TIME-BOXED to the paper-validation window** (ARCHITECTURE.md §3.7.1):
       it expires before any real money — live orders must then route
       through KTI-Broker-Service REST or be explicitly re-approved.
+      **Daemon architecture (live since 2026-09-22):** Passenger can't host
+      resident loops — `LIVE_RUNNER_MODE=daemon` + `run_live_daemon.py`
+      under `scripts/live_watchdog.sh` (cron `*/2`). Web `/orchestrator/*`
+      verbs are async: they write `tmp/live_control.json` desired-state
+      (returns `{"queued": [...], "mode": "daemon"}`) and the daemon
+      reconciles within ~5s. Watchdog also logs a `.so`-integrity count —
+      see LESSONS_LIVE_RUNNER_HOSTING.md §7 (36 binaries vanished from the
+      venv on 2026-09-27; root cause unresolved, escalated if it recurs).
 - [ ] **B2 (SOL paper week).** `crypto_sol` spec exists (hourly params,
       use_ml bias, 10% capital). Enable: set `enabled: true` in
       `config/live_strategies.yaml` on the server, restart the engine,
-      `POST /orchestrator/start {"strategy": "crypto_sol"}`. Verify:
+      `POST /orchestrator/start {"strategy": "crypto_sol"}` (daemon mode:
+      queues desired-state; confirm `state: running` ~5s later). Verify:
       heartbeat advancing in `/orchestrator/status`, one iteration per
       hour, kill-switch halts it, journal rows appear. Review R-multiples
       daily for 1 week before any live consideration.

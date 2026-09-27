@@ -105,6 +105,64 @@ are rebuilt through an `instance_factory` (registration carries a factory
 from day one), never re-run. Rule for option B/C: treat runtime instances
 as disposable; factories are the unit of restart.
 
+### 6. Web control endpoints can't reach daemon-owned instances (2026-09-27)
+
+**Symptom:** `POST /orchestrator/start` returned
+`RuntimeError: Strategy 'crypto_sol' has no instance — register it first`
+even though the daemon was running it fine.
+
+**Cause:** with `LIVE_RUNNER_MODE=daemon` there are *two* orchestrators:
+the Passenger web process (placeholders, read-only) and the daemon (owns
+the lumibot instances). The web `/start`, `/stop`, `/kill-switch`
+endpoints were still calling `start_strategy()` on their placeholders.
+
+**Fix:** desired-state reconciliation. Web endpoints now write
+`tmp/live_control.json` (`{"crypto_sol": {"desired": "running"}, ...}`);
+the daemon calls `reconcile_controls()` every ~5s and applies it —
+kubernetes-style desired vs. actual. Kill switch travels the same channel
+(`__kill_switch__` key). Two follow-on finds fixed in the same commit:
+`get_strategy_entry()` didn't exist (the `/strategies/{name}` route had
+always 500'd), and `last_error` survived restarts, showing a stale
+traceback next to `state: running` — now cleared on (re)start.
+
+**Rule:** any control-plane verb added later must go through the control
+file, never direct calls — the web process can NEVER hold a live
+instance. Also: Passenger pool recycling means a `restart.txt` touch can
+leave a stale worker serving old code for a while; when API behavior
+doesn't match freshly deployed code, check `ps` for a stale pool first.
+
+### 7. Venv .so corruption (2026-09-27, cause unknown)
+
+**Symptom:** daemon exited at boot; `import numpy` → "C-extensions
+failed"; then scipy `_sparsetools`, PIL `_imaging`, etc.
+
+**Cause:** unresolved. 36 `.so` files across 16 packages (SQLAlchemy,
+aiohttp, coincurve, cryptography, curl_cffi, duckdb, fonttools, greenlet,
+ijson, kiwisolver, lxml, matplotlib, msgpack, pillow, propcache, pyarrow)
+were missing while their `.py` files stayed intact — i.e. binaries were
+stripped *after* install. Disk was at 8%; other app venvs unaffected; no
+visible quarantine log. Working theory: host-level scanner quarantining
+binaries, or a filesystem/backup sync that dropped them.
+
+**Fix/monitoring:** force-reinstall restored it
+(`pip install --force-reinstall --no-cache-dir <pkgs>`). The watchdog now
+runs a `.so`-vs-RECORD integrity check every tick and logs
+`VENV INTEGRITY: N .so file(s) missing`. **If the count goes nonzero
+again within ~24h of a reinstall, it's a host process — escalate to the
+hosting provider** (ask specifically whether security tooling strips
+`.so` from `~/virtualenv`).
+
+**Detection recipe** (reusable on any venv):
+```python
+import importlib.metadata
+from pathlib import Path
+missing = sum(
+    1 for d in importlib.metadata.distributions()
+    for f in (d.files or [])
+    if str(f).endswith(".so") and not Path(d.locate_file(f)).exists()
+)
+```
+
 ## For whoever builds the real order path (option B/C)
 
 1. Don't host the loop in Passenger (see 1).
