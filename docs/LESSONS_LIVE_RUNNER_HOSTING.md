@@ -171,3 +171,19 @@ missing = sum(
    Broker-Service REST (idempotency keys already exist there).
 3. Persist liveness and control state separately but both durably (3).
 4. Single writer for runtime state; readers overlay from storage (4).
+
+## 5. Leave `ALPACA_*` unset in the engine env (2026-09-27)
+
+Lumibot's `credentials.py` auto-instantiates an Alpaca broker + trade
+stream at import time whenever `ALPACA_API_KEY` is present, even when the
+strategy's actual broker backend is `broker_service`. That unused
+`TRADING_STREAM_PAPER` client held ~80 of the daemon's ~120 threads and
+starved the cPanel user shell at the nproc limit (`fork: resource
+temporarily unavailable`).
+
+After renaming `ALPACA_*` -> `DISABLED_ALPACA_*` in the engine `.env` and
+restarting, the daemon dropped to a stable 41 threads and the
+`connected to: BaseURL.TRADING_STREAM_PAPER` log line disappeared.
+Order/account/position traffic continues through Broker-Service, which
+owns the real Alpaca credentials. Rule: broker credentials live in
+Broker-Service's env only; never export them to the engine.
