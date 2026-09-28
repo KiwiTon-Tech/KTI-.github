@@ -53,9 +53,16 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
 - [ ] Set on the server `.env` (Gateway): `LIVE_TRADING_ENABLED=false` for
       paper phase; flip to `true` only for the staged live rollout.
       Conservative starting limits: `MAX_DAILY_LOSS=500`, `MAX_POSITION_PCT=10`.
-- [ ] Kill-switch drill: activate via orchestrator endpoint → confirm
-      `/api/trading/execute` returns 403 `kill_switch` → confirm strategy
-      halt → deactivate.
+- [x] Kill-switch drill (2026-09-28, daemon mode): activate via
+      `POST /orchestrator/kill-switch` → control file → daemon reconcile
+      (~5s) → `KILL SWITCH ACTIVATED` → stop_all + sell_all → flag
+      persisted across daemon restart → `start_strategy` correctly
+      refused while active (guard added in 0d885fe — first drill exposed
+      reconcile resurrecting strategies) → deactivate → auto-restart ~5s.
+      Caveat: positions were flat, so sell_all flatten path is exercised
+      but unproven against a live position.
+- [ ] Kill-switch flatten coverage: repeat drill while crypto_sol holds
+      an open position to prove sells route through Broker-Service.
 - [ ] Confirm `SHARED_AUTH_TOKEN` is set on every service (blank token
       disables inter-service auth).
 
