@@ -147,6 +147,16 @@ boot. Remaining: server env vars (B1-ops) and the C5 gate before enabling.
       daily for 1 week before any live consideration.
 - [ ] **B3.** Add heartbeat metric + Grafana alert for crashed strategies.
 - [ ] **B4.** Expand to remaining crypto symbols after 1 clean week.
+- [ ] **B5 (Option B — retire the §3.7.1 exception).**
+      `app/broker_service_backend.py` implements a lumibot
+      `Broker`+`DataSource` pair over KTI-Broker-Service / KTI-Market-Data-Service
+      REST (orders carry `Idempotency-Key`; fills polled since there's no
+      stream; crypto `SOLUSD` positions normalize to the base asset).
+      Enable: `LIVE_BROKER_BACKEND=broker_service`, `BROKER_SERVICE_URL`,
+      `MARKET_DATA_URL`, `SHARED_AUTH_TOKEN` in the engine env — then REMOVE
+      `ALPACA_API_KEY`/`ALPACA_API_SECRET` and restart the daemon. Verify one
+      paper order round-trips (queued→filled, position visible via
+      `/positions`) before the exception can be deleted from ARCHITECTURE.md.
 
 ---
 

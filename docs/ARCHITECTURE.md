@@ -561,6 +561,11 @@ strategy even works.
    through KTI-Broker-Service REST (option B: a Lumibot HTTP broker
    adapter, or option C: drop the Lumibot live loop for a REST-driven
    one), or an explicit documented re-approval.
+   **Option B is implemented** (2026-09-27): `app/broker_service_backend.py`
+   provides a lumibot `Broker`+`DataSource` over the two internal REST
+   services; activate with `LIVE_BROKER_BACKEND=broker_service` (checklist
+   item B5). The exception is retired once that backend is running paper
+   cleanly and the Alpaca env vars are removed.
 2. The paper week disproves the approach (then delete the runner).
 
 Every UI/manual flow still goes through Broker-Service REST, and all
