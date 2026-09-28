@@ -187,3 +187,32 @@ restarting, the daemon dropped to a stable 41 threads and the
 Order/account/position traffic continues through Broker-Service, which
 owns the real Alpaca credentials. Rule: broker credentials live in
 Broker-Service's env only; never export them to the engine.
+
+## 6. Orchestrator heartbeat config + thread teardown (2026-09-28)
+
+Two coupled defects caused an overnight crash storm:
+
+1. `config/orchestrator.yaml` set `heartbeat_timeout_seconds: 300`, but
+   heartbeats stamp once per trading iteration (1H for crypto_sol) — the
+   monitor rebuilt the Trader every ~5 min.
+2. `trader.stop_all()` sets stop_event but does NOT shut down the
+   executor's APScheduler pool, so each rebuild orphaned ~40 threads
+   still polling /account. ~2h of orphans hit the LVE/nproc ceiling ->
+   `RuntimeError: can't start new thread` -> crash-spam storm where every
+   orphaned executor independently logged the same failure.
+
+Fixes (a1ade88, 751b199): yaml timeout raised to 5400s (must exceed the
+longest sleeptime in live_strategies.yaml); dead executor threads are
+detected immediately via thread.is_alive() instead of waiting out the
+window; stop path shuts down each executor's APScheduler. Daemon now
+holds a stable ~41 threads.
+
+Debug tooling: `kill -USR1 <daemon pid>` dumps every thread's Python
+stack into watchdog.log (faulthandler) — added in c7fe829.
+
+Broker-service adapter shakedown (58180ee, d7fd223): live responses
+differed from mocks — `get_historical_prices` must match the upstream
+DataSource signature (`include_after_hours`, **kwargs), OHLCV columns
+need pd.to_numeric coercion (service serializes as strings), and crypto
+quotes carry bid_price/ask_price only so get_last_price uses the spread
+midpoint.
