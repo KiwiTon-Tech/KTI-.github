@@ -136,6 +136,9 @@ jobs:
             --exclude 'node_modules' \
             --exclude 'models' \
             --exclude 'models-backup*' \
+            --exclude 'state' \
+            --exclude 'tmp' \
+            --exclude 'logs' \
             ./ ${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:${{ inputs.app_path }}/
 
       - name: Sync .env to server
