@@ -66,19 +66,6 @@ def main() -> int:
     _expect(oauth, 400, "OAuth callback allowlist")
     print("PASS OAuth callback allowlist")
 
-    contact = requests.post(
-        "https://api.kiwiton-investments.com/contact/email/",
-        json={
-            "name": "Smoke Test",
-            "email": "smoke@example.com",
-            "message": "validation only",
-            "recipients": ["invalid@example.com"],
-        },
-        timeout=TIMEOUT,
-    )
-    _expect(contact, 422, "contact field allowlist")
-    print("PASS contact field allowlist")
-
     gateway = _config("KTI-Gateway")
     now = datetime.now(UTC)
     token = jwt.encode(

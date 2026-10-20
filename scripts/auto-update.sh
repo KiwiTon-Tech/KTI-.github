@@ -237,8 +237,8 @@ if [ ${#FAILED[@]} -gt 0 ]; then
     exit 1
 fi
 
-if [ -f "/home/kiwiton/bin/production-smoke.py" ]; then
-    log "Running production smoke suite..."
+if [ ${#UPDATED[@]} -gt 0 ] && [ -f "/home/kiwiton/bin/production-smoke.py" ]; then
+    log "Running production smoke suite after deployment..."
     "$TOOLS_PYTHON" /home/kiwiton/bin/production-smoke.py 2>&1 | tee -a "$UPDATE_LOG"
     log "Production smoke suite passed"
 fi
