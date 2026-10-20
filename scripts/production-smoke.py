@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import jwt
 import requests
 from dotenv import dotenv_values
 
@@ -29,6 +32,18 @@ def _expect(response: requests.Response, status: int, label: str) -> dict:
     if response.headers.get("content-type", "").startswith("application/json"):
         return response.json()
     return {}
+
+
+def _jwt(payload: dict, secret: str) -> str:
+    def encode(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+
+    header = encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = encode(json.dumps(payload, separators=(",", ":")).encode())
+    signature = encode(
+        hmac.new(secret.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
+    )
+    return f"{header}.{body}.{signature}"
 
 
 def main() -> int:
@@ -68,7 +83,7 @@ def main() -> int:
 
     gateway = _config("KTI-Gateway")
     now = datetime.now(UTC)
-    token = jwt.encode(
+    token = _jwt(
         {
             "userId": "deployment-smoke",
             "role": "admin",
@@ -76,7 +91,6 @@ def main() -> int:
             "exp": int((now + timedelta(minutes=5)).timestamp()),
         },
         gateway["JWT_SECRET"],
-        algorithm="HS256",
     )
     contract = requests.post(
         "https://api.kiwiton-investments.com/api/trading/execute",
