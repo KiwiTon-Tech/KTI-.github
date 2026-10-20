@@ -83,6 +83,9 @@ needs_update() {
     if [ ! -d "$service_path/.git" ]; then
         return 1  # Not a git repo
     fi
+    if [ -f "$service_path/tmp/deploy_failed" ]; then
+        return 0
+    fi
     
     cd "$service_path"
     
@@ -108,12 +111,19 @@ snapshot_release() {
     local release_root="/home/kiwiton/releases/${service}"
     local release_path="${release_root}/${commit}"
     mkdir -p "$release_root"
-    if [ ! -d "$release_path" ]; then
-        rsync -a \
-            --exclude '.git' --exclude '.env' --exclude '.env.local' \
-            --exclude '.venv' --exclude 'models' --exclude 'models-backup*' \
-            --exclude 'state' --exclude 'tmp' --exclude 'logs' --exclude 'node_modules' \
-            "${service_path}/" "${release_path}/"
+    if [ ! -d "$release_path" ] || [ -z "$(find "$release_path" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+        rm -rf "$release_path"
+        mkdir -p "$release_path"
+        tar -C "$service_path" \
+            --exclude='./.git' --exclude='./.env' --exclude='./.env.local' \
+            --exclude='./.venv' --exclude='./models' --exclude='./models-backup*' \
+            --exclude='./state' --exclude='./tmp' --exclude='./logs' \
+            --exclude='./node_modules' -cf - . \
+            | tar -C "$release_path" -xf -
+        if [ -z "$(find "$release_path" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+            error "Release snapshot is empty: $release_path"
+            return 1
+        fi
         chmod -R a-w "$release_path"
     fi
     ln -sfn "$release_path" "${release_root}/current"
@@ -147,7 +157,11 @@ update_service() {
     # Run deploy script
     if bash "${service_path}/deploy.sh" production "$branch" 2>&1 | tee -a "$UPDATE_LOG"; then
         log "✅ ${service} updated successfully"
-        snapshot_release "$service"
+        rm -f "${service_path}/tmp/deploy_failed"
+        if ! snapshot_release "$service"; then
+            error "Release snapshot failed for ${service}"
+            return 1
+        fi
         
         # Send notification (optional - can integrate with Slack/Discord)
         # curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-type: application/json' \
@@ -155,6 +169,8 @@ update_service() {
         
         return 0
     else
+        mkdir -p "${service_path}/tmp"
+        touch "${service_path}/tmp/deploy_failed"
         error "❌ ${service} update failed"
         
         # Send failure notification

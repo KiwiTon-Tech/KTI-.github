@@ -23,11 +23,12 @@ if [ -z "${RELEASE:-}" ] || [ ! -d "$RELEASE" ]; then
     exit 1
 fi
 
-rsync -a --delete \
-    --exclude '.git' --exclude '.env' --exclude '.env.local' \
-    --exclude '.venv' --exclude 'models' --exclude 'models-backup*' \
-    --exclude 'state' --exclude 'tmp' --exclude 'logs' --exclude 'node_modules' \
-    "${RELEASE}/" "${APP}/"
+find "$APP" -mindepth 1 -maxdepth 1 \
+    ! -name '.git' ! -name '.env' ! -name '.env.local' ! -name '.venv' \
+    ! -name 'models' ! -name 'models-backup*' ! -name 'state' \
+    ! -name 'tmp' ! -name 'logs' ! -name 'node_modules' \
+    -exec rm -rf {} +
+cp -a "${RELEASE}/." "${APP}/"
 
 VENV="/home/kiwiton/virtualenv/apps/${SERVICE}/3.11"
 if [ -x "$VENV/bin/pip" ] && [ -f "$APP/requirements.txt" ]; then
