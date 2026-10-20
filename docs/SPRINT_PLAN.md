@@ -1,8 +1,8 @@
 # KiwiTon Investments — Sprint Plan
 
-**Status**: Sprints 1–7 In Progress 🚧 · Crypto risk-model rewrite landed 2026-09-20
+**Status**: Historical sprint ledger. Current production status and remaining roadmap are maintained in `ARCHITECTURE.md`, `GO_LIVE_CHECKLIST.md`, and workspace `ChatGPT.md`.
 **Created**: 2026-06-09
-**Updated**: 2026-09-20
+**Updated**: 2026-10-20 (status banner only)
 **Owner**: Zander Bolyanatz
 
 This plan captures the remaining work to finish **Phase 7** (critical backend & trading infrastructure) plus model-quality and tech-debt items, based on a full repo audit. It supersedes the planning sections of `PHASE_7_IMPLEMENTATION_PLAN.md` with verified code state.

@@ -1,0 +1,41 @@
+name: Deploy cPanel controller
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/auto-update.sh"
+      - "scripts/production-smoke.py"
+      - "scripts/rollback-release.sh"
+      - ".github/workflows/deploy-controller.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CPANEL_SSH_KEY }}
+      - name: Add cPanel host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.CPANEL_HOST }}" >> ~/.ssh/known_hosts
+      - name: Install controller scripts
+        run: |
+          scp -o StrictHostKeyChecking=yes scripts/auto-update.sh \
+            "${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:/home/${{ secrets.CPANEL_USER }}/bin/auto-update.sh.new"
+          scp -o StrictHostKeyChecking=yes scripts/production-smoke.py \
+            "${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:/home/${{ secrets.CPANEL_USER }}/bin/production-smoke.py.new"
+          scp -o StrictHostKeyChecking=yes scripts/rollback-release.sh \
+            "${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}:/home/${{ secrets.CPANEL_USER }}/bin/rollback-release.sh.new"
+          ssh "${{ secrets.CPANEL_USER }}@${{ secrets.CPANEL_HOST }}" bash -s <<'REMOTE'
+          set -euo pipefail
+          chmod 755 "$HOME/bin/auto-update.sh.new"
+          chmod 755 "$HOME/bin/production-smoke.py.new"
+          chmod 755 "$HOME/bin/rollback-release.sh.new"
+          mv "$HOME/bin/auto-update.sh.new" "$HOME/bin/auto-update.sh"
+          mv "$HOME/bin/production-smoke.py.new" "$HOME/bin/production-smoke.py"
+          mv "$HOME/bin/rollback-release.sh.new" "$HOME/bin/rollback-release.sh"
+          REMOTE

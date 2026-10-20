@@ -1,6 +1,6 @@
 # Go-Live Checklist — Start Investing This Week
 
-**Status**: Active
+**Status**: Active — execution safety and durable research controls updated 2026-10-20
 **Created**: 2026-09-20
 **Owner**: Zander Bolyanatz
 
@@ -18,9 +18,9 @@ Service), WebSocket price streaming (CF Worker + PriceHub DO), R2 model
 storage + cold-start restore, deployment automation (5-min auto-deploy cron),
 order execution frontend (`TradeTicket` + `OrderConfirmDialog`).
 
-**In progress / stale:** Sprint 7 retrain was started 2026-07-08 and the plan
-was last updated that day — results were never recorded. Sprint 8 (Grafana
-alerting) is not done. Sprint 10 (live trading staged rollout) is this week.
+**October 2026 safety update:** Broker Service is now the mandatory boundary for manual and strategy orders; halt state is versioned and latched in PostgreSQL; durable idempotency and verified exposure reduction are enforced at Broker; OAuth/contact/service-auth bypasses are closed; realtime subscriptions are bounded/acknowledged with tick-age fallback; ML research uses point-in-time model/input eligibility and calibrated artifacts.
+
+**In progress:** Durable PostgreSQL ML training jobs and a supervised strictly sequential worker replace Passenger-local tasks after a full-universe retrain was interrupted. The first SPY candidate failed holdout thresholds and remained inactive, so no active model changed. Automated migration/controller/smoke rollout and immutable-release rollback remain deployment work; Grafana alerting remains incomplete.
 
 **Critical gap found in audit — CLOSED 2026-09-20 (Track B1):**
 `KTI-Strategy-Engine` had **no live strategy runners**. The live runner

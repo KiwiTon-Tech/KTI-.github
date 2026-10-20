@@ -3,11 +3,14 @@
 # Run via cron: */5 * * * * /home/kiwiton/bin/auto-update.sh >> /home/kiwiton/logs/auto-update.log 2>&1
 
 set -e
+set -o pipefail
 
 # Configuration
 BASE_PATH="/home/kiwiton/apps"
+TOOLS_PATH="/home/kiwiton/tools"
 LOG_DIR="/home/kiwiton/logs"
 LOCK_FILE="/tmp/kti-auto-update.lock"
+TOOLS_PYTHON="/home/kiwiton/venvs/kti-tools/bin/python"
 
 # Services to auto-update (in order of dependency)
 # KTI-DB is excluded (usually needs manual migration coordination)
@@ -97,6 +100,28 @@ needs_update() {
 }
 
 # Function to update a service
+snapshot_release() {
+    local service=$1
+    local service_path="${BASE_PATH}/${service}"
+    local commit
+    commit=$(git -C "$service_path" rev-parse --short=12 HEAD)
+    local release_root="/home/kiwiton/releases/${service}"
+    local release_path="${release_root}/${commit}"
+    mkdir -p "$release_root"
+    if [ ! -d "$release_path" ]; then
+        rsync -a \
+            --exclude '.git' --exclude '.env' --exclude '.env.local' \
+            --exclude '.venv' --exclude 'models' --exclude 'models-backup*' \
+            --exclude 'state' --exclude 'tmp' --exclude 'logs' --exclude 'node_modules' \
+            "${service_path}/" "${release_path}/"
+        chmod -R a-w "$release_path"
+    fi
+    ln -sfn "$release_path" "${release_root}/current"
+    find "$release_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+        | sort -nr | tail -n +6 | cut -d' ' -f2- | xargs -r rm -rf
+    log "Immutable release snapshot recorded: ${service}@${commit}"
+}
+
 update_service() {
     local service=$1
     local service_path="${BASE_PATH}/${service}"
@@ -122,6 +147,7 @@ update_service() {
     # Run deploy script
     if bash "${service_path}/deploy.sh" production "$branch" 2>&1 | tee -a "$UPDATE_LOG"; then
         log "✅ ${service} updated successfully"
+        snapshot_release "$service"
         
         # Send notification (optional - can integrate with Slack/Discord)
         # curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-type: application/json' \
@@ -138,6 +164,38 @@ update_service() {
         return 1
     fi
 }
+
+update_database() {
+    local db_path="${TOOLS_PATH}/KTI-DB"
+    if [ ! -d "${db_path}/.git" ]; then
+        error "KTI-DB checkout missing at ${db_path}"
+        return 1
+    fi
+
+    log "Updating migration authority..."
+    cd "$db_path"
+    git fetch git@github.com:KiwiTon-Tech/KTI-DB.git main 2>&1 | tee -a "$UPDATE_LOG"
+    git reset --hard FETCH_HEAD 2>&1 | tee -a "$UPDATE_LOG"
+
+    log "Applying tracked database migrations..."
+    "$TOOLS_PYTHON" - "$BASE_PATH/KTI-Broker-Service/.env" "$db_path/python/migrate.py" <<'PY' 2>&1 | tee -a "$UPDATE_LOG"
+import os
+import subprocess
+import sys
+from dotenv import dotenv_values
+
+env_file, runner = sys.argv[1:]
+env = os.environ.copy()
+env.update({key: value for key, value in dotenv_values(env_file).items() if value})
+env["NODE_ENV"] = "production"
+subprocess.run([sys.executable, runner], check=True, env=env)
+PY
+}
+
+if ! update_database; then
+    error "Database migration failed; service deployment aborted"
+    exit 1
+fi
 
 # Track results
 UPDATED=()
@@ -177,6 +235,12 @@ fi
 if [ ${#FAILED[@]} -gt 0 ]; then
     error "Failed services: ${FAILED[*]}"
     exit 1
+fi
+
+if [ -f "/home/kiwiton/bin/production-smoke.py" ]; then
+    log "Running production smoke suite..."
+    "$TOOLS_PYTHON" /home/kiwiton/bin/production-smoke.py 2>&1 | tee -a "$UPDATE_LOG"
+    log "Production smoke suite passed"
 fi
 
 # Cleanup old logs (keep 30 days)

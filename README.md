@@ -17,7 +17,7 @@ This repository hosts:
 
 | Repo | Purpose |
 |------|---------|
-| [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | Public BFF (Next.js) |
+| [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | Public Flask BFF, OAuth, aggregation, safety-aware order proxy |
 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Alpaca adapter |
 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Bars, quotes, WS streams |
 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | finBERT sentiment inference |
@@ -29,17 +29,13 @@ This repository hosts:
 | [`KTI-Strategies`](https://github.com/KiwiTon-Tech/KTI-Strategies) | Shared Lumibot strategy package (`MLTrader`, `CryptoTrader`, `ForexTrader`) |
 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator) | Strategy control plane (optional) |
 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | Prometheus + Grafana + ELK config |
-| [`KTI-DB-Migrations`](https://github.com/KiwiTon-Tech/KTI-DB-Migrations) | Postgres schema |
+| [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | Canonical PostgreSQL schema, migration authority, and DAL packages |
 | [`KTI-Contracts`](https://github.com/KiwiTon-Tech/KTI-Contracts) | OpenAPI specs + generated clients |
 | [`KTI-Platform`](https://github.com/KiwiTon-Tech/KTI-Platform) | Local dev orchestration (Procfile / honcho) |
 
 ## Deployment Model
 
-**Deployments are pulled by cPanel, not pushed by GitHub Actions.** Most
-shared cPanel hosts (including the production `t-4.net` host) block inbound
-SSH, so the rsync-from-CI pattern doesn't work. We use the inverse: the
-cPanel server uses a **GitHub App** (`KTI-Deploy-Bot`) to mint a short-lived
-installation token and `git pull` directly from GitHub.
+**Application deployments are pulled by the cPanel controller.** `/home/kiwiton/bin/auto-update.sh` runs under a global lock, updates the Python migration authority over SSH, applies checksum-tracked migrations before services, deploys changed repositories in dependency order, manages supervised workers/cron, and runs authenticated production smoke tests. GitHub Actions installs controller scripts atomically. Cloudflare Pages and the WebSocket Worker deploy through their native GitHub integrations/Workflows.
 
 Full setup playbook (one-time per cPanel server, ~15 min):
 [`docs/CPANEL_DEPLOYMENT.md`](./docs/CPANEL_DEPLOYMENT.md).

@@ -4,6 +4,28 @@ End-to-end setup for deploying any `KTI-*` service to a shared cPanel host
 that **blocks inbound SSH** (e.g. `t-4.net`). The model is "cPanel pulls from
 GitHub", authenticated via a single org-level GitHub App.
 
+## Current production controller (October 2026)
+
+Production remains native cPanel/Passenger plus PostgreSQL—no Docker. The installed `/home/kiwiton/bin/auto-update.sh` is the deployment controller:
+
+1. Acquire a global deployment lock.
+2. Pull `KTI-DB` over SSH and run the Python migration authority.
+3. Validate `schema_migrations` checksums and apply only pending files under a PostgreSQL advisory lock.
+4. Deploy changed services in dependency order.
+5. Restart Passenger and supervised workers; ML deploys idempotently manage watchdog/scheduler cron entries.
+6. Run `/home/kiwiton/bin/production-smoke.py` against authenticated/public production contracts.
+
+`KTI-.github/.github/workflows/deploy-controller.yml` atomically installs controller scripts on hosts that permit Actions SSH. Hosts that block inbound SSH require a one-time manual copy to `/home/kiwiton/bin`; subsequent application deployment remains pull-based. Existing production databases must be bootstrapped once with `python migrate.py --baseline-existing` before automatic migration mode is enabled.
+
+After each successful service deployment, the controller writes a read-only snapshot under `/home/kiwiton/releases/<service>/<commit>` and updates the `current` symlink. It retains 5 snapshots. Rollback restores a selected snapshot into the fixed Passenger app path while preserving `.env`, models, state, temporary control files, logs, and virtualenvs:
+
+```bash
+/home/kiwiton/bin/rollback-release.sh KTI-Gateway
+/home/kiwiton/bin/rollback-release.sh KTI-Gateway <commit>
+```
+
+The live Passenger path remains fixed for cPanel compatibility; immutability applies to release snapshots and rollback sources.
+
 This playbook is split into:
 
 - **[Part A](#part-a-one-time-org-setup)** — one-time GitHub-side setup (run once for the entire org).

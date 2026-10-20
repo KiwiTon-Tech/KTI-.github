@@ -1,7 +1,7 @@
 # KiwiTon Investments — Microservices Architecture
 
-> **Status**: Phase 6 complete (8 services live, structured logging + Prometheus); Phase 7 frontend in progress — Workstreams A (order execution UI) and C (WebSocket layer) shipped, Section 10.2 architectural substrate complete, Sprint 2 page rollouts underway (`/positions`, `/dashboard`, `/trades`, `/signals`, `/models`, `/symbol`, `/backtests`, `/trade` migrated)
-> **Last updated**: 2026-05-28
+> **Status**: Production microservices, authoritative Broker safety boundary, point-in-time ML research, durable PostgreSQL queues, Cloudflare WebSocket acknowledgements, and automated deployment controls are live or in rollout.
+> **Last updated**: 2026-10-20
 > **Owner**: Zander Bolyanatz
 
 This document describes the target microservices decomposition for the KiwiTon
@@ -9,6 +9,16 @@ Investments platform, the responsibilities of each service, how they
 communicate, and the rollout plan from the current semi-monolithic layout
 (`Kiwiton-Investments-Backend` + `KiwiTon-Strategy-Engine`) into
 independently-deployed repositories with their own CI/CD pipelines.
+
+## October 2026 Production Invariants
+
+1. **Broker Service is the only order boundary.** Manual and strategy orders carry one idempotency key to Broker, which reads the versioned PostgreSQL halt state, reconciles positions/open orders, rejects unverified exposure increases, applies portfolio controls, and persists the request fingerprint/result.
+2. **Research is point-in-time.** Historical prediction requires a model whose training cutoff and promotion timestamp were available at `as_of`; all market, sentiment, and regime inputs use that same anchor. Calibrated estimators are persisted as part of the artifact.
+3. **Long work never belongs in Passenger.** Strategy execution and ML training run as supervised native Python daemons. PostgreSQL queues provide atomic claiming, bounded admission, leases, heartbeats, deadlines, recovery, and durable results. Full-universe ML training is strictly sequential.
+4. **Artifacts and state have distinct owners.** PostgreSQL stores operational/job/audit state. Cloudflare R2 stores versioned ML artifacts. Runtime state, control files, logs, and model caches are excluded from destructive release synchronization.
+5. **Realtime freshness is explicit.** The Cloudflare Durable Object validates and limits subscriptions and acknowledges each symbol. Frontend REST fallback depends on acknowledgement and tick age, not socket connectivity alone.
+6. **Authentication fails closed.** Blank service tokens return unavailable/startup failure unless `ALLOW_UNAUTHENTICATED_DEV=true` is explicitly set. Callers use target-specific outbound credentials.
+7. **Production is native cPanel/PostgreSQL, not Docker.** The deployment controller applies checksum-tracked migrations under a PostgreSQL advisory lock before service rollout and runs authenticated smoke tests afterward.
 
 ---
 
@@ -38,15 +48,15 @@ shared/infra repos.
 |---|------|----------|------|--------|
 | 1 | [`KTI-Gateway`](https://github.com/KiwiTon-Tech/KTI-Gateway) | Python (Flask) | BFF / API gateway | ✅ Live at `api.kiwiton-investments.com` (broker integration complete) |
 | 2 | [`KTI-Broker-Service`](https://github.com/KiwiTon-Tech/KTI-Broker-Service) | Python (FastAPI) | Alpaca adapter | ✅ Live at `broker.kiwiton-investments.com` |
-| 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI + WS) | Streaming | ✅ Live at `market.kiwiton-investments.com` (REST only; WS deferred to Phase 3b) |
+| 3 | [`KTI-Market-Data-Service`](https://github.com/KiwiTon-Tech/KTI-Market-Data-Service) | Python (FastAPI) | REST market data | ✅ Live at `market.kiwiton-investments.com`; WebSocket fan-out is owned by `KTI-CF-WS-Worker` |
 | 4 | [`KTI-NLP-Service`](https://github.com/KiwiTon-Tech/KTI-NLP-Service) | Python (FastAPI) | ML inference (FinBERT) | ✅ Live at `nlp.kiwiton-investments.com` |
 | 5 | [`KTI-News-Sentiment-Service`](https://github.com/KiwiTon-Tech/KTI-News-Sentiment-Service) | Python (FastAPI) | News ingest + sentiment API | ✅ Live at `news.kiwiton-investments.com` |
-| 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI) | ML train + predict | ✅ Live at `ml.kiwiton-investments.com` |
+| 6 | [`KTI-ML-Service`](https://github.com/KiwiTon-Tech/KTI-ML-Service) | Python (FastAPI + supervised worker) | Point-in-time ML inference + durable sequential training | ✅ Live at `ml.kiwiton-investments.com`; PostgreSQL jobs + R2 artifacts |
 | 7 | [`KTI-Strategy-Engine`](https://github.com/KiwiTon-Tech/KTI-Strategy-Engine) | Python (FastAPI) | Strategy orchestrator | ✅ Live at `engine.kiwiton-investments.com` (orchestrator + strategy registry; `/orchestrator/*` + `/strategies/*` proxied via Gateway) |
 | 8 | [`KTI-Backtest-Service`](https://github.com/KiwiTon-Tech/KTI-Backtest-Service) | Python (FastAPI) | Job queue + workers | ✅ Live at `backtest.kiwiton-investments.com` (Lumibot engine, SMA crossover reference strategy, Postgres job queue) |
 | 9 | [`KTI-Orchestrator`](https://github.com/KiwiTon-Tech/KTI-Orchestrator)* | Python | Control plane | Optional |
 | 10 | [`KTI-Observability`](https://github.com/KiwiTon-Tech/KTI-Observability) | Python + YAML | Metrics + logging | ✅ Phase 6 — `structlog` + Prometheus `/metrics` deployed to all 8 services; Grafana Cloud dashboard ready to import |
-| 11 | [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | SQL + Python + TS | Central schema + DAL | ✅ Deployed (8 migrations applied) |
+| 11 | [`KTI-DB`](https://github.com/KiwiTon-Tech/KTI-DB) | SQL + Python + TS | Central schema + Python migration authority + DAL | ✅ Migrations 001–013 applied; checksum ledger/locking in rollout |
 | 12 | [`KTI-Contracts`](https://github.com/KiwiTon-Tech/KTI-Contracts)* | OpenAPI + codegen | Typed cross-service clients | Optional |
 | 13 | [`KTI-.github`](https://github.com/KiwiTon-Tech/KTI-.github) | YAML + MD | Reusable CI workflows + deployment playbook | ✅ Live |
 
@@ -76,11 +86,12 @@ OpenAPI 3.0 docs at `/docs` (Swagger UI).
 - Request routing + response shaping for the UI.
 - Aggregation of downstream service responses (e.g. dashboard = broker +
   market-data + ml-service).
-- No business logic. No direct Alpaca calls. No database writes except for
-  auth/session tables.
+- No direct Alpaca calls. Broker Service is the mandatory final execution/safety boundary.
+- Owns BFF validation and selected shared-schema reads/writes (auth codes, monitoring,
+  portfolio/config surfaces); canonical schemas remain in `KTI-DB`.
 - Service health aggregation for frontend status indicators.
 
-**Current State** (as of 2026-05-24): **Frontend ↔ Gateway wiring Phases A/B/C complete — every `api.js` client object has a live Gateway route.** Only remaining stub: `tradingApi.executeTrade` (POST /api/trading/execute) — not yet used by any page and requires safety controls around live order submission.
+**Current State** (2026-10-20): Frontend↔Gateway wiring is complete. `POST /api/trading/execute` is used by the trade ticket, supports validated quantity/notional contracts and stable idempotency keys, and delegates final halt/exposure/risk/idempotency enforcement to Broker Service. Google OAuth uses exact callback-origin allowlisting, session-bound single-use state, and a short-lived authorization-code exchange.
 
 #### Part 1 — Routes wired (this sprint)
 
