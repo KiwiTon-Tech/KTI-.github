@@ -235,6 +235,13 @@ for service in "${SERVICES[@]}"; do
         fi
     else
         UP_TO_DATE+=("$service")
+        release_root="/home/kiwiton/releases/${service}"
+        current_release=$(readlink -f "${release_root}/current" 2>/dev/null || true)
+        if [ ! -L "${release_root}/current" ] \
+            || [ ! -d "$current_release" ] \
+            || [ -z "$(find "$current_release" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            snapshot_release "$service"
+        fi
     fi
 done
 
