@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +35,18 @@ def _expect(response: requests.Response, status: int, label: str) -> dict:
     return {}
 
 
+def _get_with_retry(url: str, attempts: int = 3) -> requests.Response:
+    error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return requests.get(url, timeout=30)
+        except requests.RequestException as exc:
+            error = exc
+            if attempt + 1 < attempts:
+                time.sleep(5)
+    raise RuntimeError(f"GET {url} failed after {attempts} attempts: {error}")
+
+
 def _jwt(payload: dict, secret: str) -> str:
     def encode(value: bytes) -> str:
         return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
@@ -58,7 +71,7 @@ def main() -> int:
         "https://engine.kiwiton-investments.com/health",
     )
     for url in health_urls:
-        response = requests.get(url, timeout=TIMEOUT)
+        response = _get_with_retry(url)
         _expect(response, 200, url)
         print(f"PASS health {url}")
 
