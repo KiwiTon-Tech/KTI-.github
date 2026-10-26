@@ -259,7 +259,8 @@ for service in "${SERVICES[@]}"; do
         UP_TO_DATE+=("$service")
         release_root="/home/kiwiton/releases/${service}"
         current_release=$(readlink -f "${release_root}/current" 2>/dev/null || true)
-        if ! has_local_edits "$service" && {
+        if git -C "$service_path" rev-parse -q --verify HEAD >/dev/null 2>&1 \
+            && ! has_local_edits "$service" && {
             [ ! -L "${release_root}/current" ] \
             || [ ! -d "$current_release" ] \
             || [ -z "$(find "$current_release" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; }; then
