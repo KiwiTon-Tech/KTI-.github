@@ -34,6 +34,9 @@ on:
         required: true
       CPANEL_SSH_KEY:
         required: true
+      CPANEL_PORT:
+        description: "SSH port of the cPanel host (defaults to 22)."
+        required: false
 
 jobs:
   lint-test-build:
@@ -96,7 +99,9 @@ jobs:
       - name: Add cPanel host to known_hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.CPANEL_HOST }} >> ~/.ssh/known_hosts
+          PORT="${{ secrets.CPANEL_PORT }}"; PORT="${PORT:-22}"
+          printf 'Host %s\n  Port %s\n' "${{ secrets.CPANEL_HOST }}" "$PORT" >> ~/.ssh/config
+          ssh-keyscan -p "$PORT" -H "${{ secrets.CPANEL_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Rsync project to cPanel
         run: |
