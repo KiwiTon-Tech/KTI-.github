@@ -97,9 +97,18 @@ needs_update() {
     
     if [ "$LOCAL" != "$REMOTE" ]; then
         return 0  # Needs update
-    else
-        return 1  # Up to date
     fi
+
+    # HEAD moved without this script (e.g. a manual deploy.sh run). Redeploy so the
+    # snapshot is only advanced after deploy.sh succeeds, never on an unverified HEAD.
+    local current_release
+    current_release=$(readlink -f "/home/kiwiton/releases/${service}/current" 2>/dev/null || true)
+    if [ -n "$current_release" ] && [ -d "$current_release" ] \
+        && [ "$(basename "$current_release")" != "$(git rev-parse --short=12 HEAD)" ]; then
+        log "${service}: release snapshot $(basename "$current_release") is not HEAD; redeploying to verify"
+        return 0
+    fi
+    return 1  # Up to date
 }
 
 # deploy.sh hard-resets to origin, so never deploy over edits made on the server
@@ -145,7 +154,7 @@ update_service() {
 
     if has_local_edits "$service"; then
         error "${service} has uncommitted edits to tracked files; not deploying (deploy.sh would erase them). Commit or revert:"
-        git -C "$service_path" status --short --untracked-files=no | head -5 | tee -a "$UPDATE_LOG"
+        git -C "$service_path" status --short --untracked-files=no | sed -n '1,5p' | tee -a "$UPDATE_LOG"
         return 2
     fi
 
@@ -250,12 +259,9 @@ for service in "${SERVICES[@]}"; do
         UP_TO_DATE+=("$service")
         release_root="/home/kiwiton/releases/${service}"
         current_release=$(readlink -f "${release_root}/current" 2>/dev/null || true)
-        head_commit=$(git -C "$service_path" rev-parse --short=12 HEAD 2>/dev/null || true)
-        # Also re-snapshot when HEAD moved without this script (e.g. a manual deploy.sh run)
-        if [ -n "$head_commit" ] && ! has_local_edits "$service" && {
+        if ! has_local_edits "$service" && {
             [ ! -L "${release_root}/current" ] \
             || [ ! -d "$current_release" ] \
-            || [ "$(basename "$current_release")" != "$head_commit" ] \
             || [ -z "$(find "$current_release" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; }; then
             snapshot_release "$service"
         fi
