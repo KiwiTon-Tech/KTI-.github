@@ -95,10 +95,14 @@ def main() -> int:
     print("PASS OAuth callback allowlist")
 
     gateway = _config("KTI-Gateway")
+    allowed = [e.strip() for e in gateway.get("ALLOWED_EMAILS", "").split(",") if e.strip()]
+    if not allowed:
+        raise RuntimeError("Gateway order contract: ALLOWED_EMAILS is empty in KTI-Gateway/.env")
     now = datetime.now(UTC)
     token = _jwt(
         {
             "userId": "deployment-smoke",
+            "email": allowed[0],
             "role": "admin",
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=5)).timestamp()),
