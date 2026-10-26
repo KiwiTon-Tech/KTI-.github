@@ -68,7 +68,11 @@ jobs:
           GH_DEPS_TOKEN: ${{ secrets.GH_DEPS_TOKEN }}
         run: |
           if [ -n "$GH_DEPS_TOKEN" ]; then
-            git config --global url."https://x-access-token:${GH_DEPS_TOKEN}@github.com/".insteadOf "https://github.com/"
+            # requirements use git+ssh URLs (the cPanel server has an SSH key);
+            # rewrite those to token-authenticated HTTPS on the runner too.
+            for prefix in "https://github.com/" "ssh://git@github.com/" "git@github.com:"; do
+              git config --global --add url."https://x-access-token:${GH_DEPS_TOKEN}@github.com/".insteadOf "$prefix"
+            done
             echo "Git insteadOf rule installed for github.com."
           else
             echo "GH_DEPS_TOKEN not set — skipping (only works for fully public deps)."
