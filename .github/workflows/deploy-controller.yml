@@ -21,7 +21,9 @@ jobs:
       - name: Add cPanel host
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.CPANEL_HOST }}" >> ~/.ssh/known_hosts
+          PORT="${{ secrets.CPANEL_PORT }}"; PORT="${PORT:-22}"
+          printf 'Host %s\n  Port %s\n' "${{ secrets.CPANEL_HOST }}" "$PORT" >> ~/.ssh/config
+          ssh-keyscan -p "$PORT" -H "${{ secrets.CPANEL_HOST }}" >> ~/.ssh/known_hosts
       - name: Install controller scripts
         run: |
           scp -o StrictHostKeyChecking=yes scripts/auto-update.sh \
