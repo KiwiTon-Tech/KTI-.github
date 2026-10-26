@@ -102,7 +102,11 @@ needs_update() {
     fi
 }
 
-# Function to update a service
+# deploy.sh hard-resets to origin, so never deploy over edits made on the server
+has_local_edits() {
+    [ -n "$(git -C "${BASE_PATH}/$1" status --porcelain --untracked-files=no 2>/dev/null)" ]
+}
+
 snapshot_release() {
     local service=$1
     local service_path="${BASE_PATH}/${service}"
@@ -138,7 +142,13 @@ update_service() {
     local branch="${SERVICE_BRANCHES[$service]:-main}"
     
     log "Updating ${service} (branch: ${branch})..."
-    
+
+    if has_local_edits "$service"; then
+        error "${service} has uncommitted edits to tracked files; not deploying (deploy.sh would erase them). Commit or revert:"
+        git -C "$service_path" status --short --untracked-files=no | head -5 | tee -a "$UPDATE_LOG"
+        return 2
+    fi
+
     cd "$service_path"
     
     # Bootstrap: if deploy.sh is missing, pull latest code first so we get it
@@ -217,6 +227,7 @@ fi
 UPDATED=()
 FAILED=()
 UP_TO_DATE=()
+SKIPPED=()
 
 for service in "${SERVICES[@]}"; do
     service_path="${BASE_PATH}/${service}"
@@ -228,18 +239,24 @@ for service in "${SERVICES[@]}"; do
     
     if needs_update "$service"; then
         log "🔔 ${service} has new commits"
-        if update_service "$service"; then
-            UPDATED+=("$service")
-        else
-            FAILED+=("$service")
-        fi
+        rc=0
+        update_service "$service" || rc=$?
+        case "$rc" in
+            0) UPDATED+=("$service") ;;
+            2) SKIPPED+=("$service") ;;
+            *) FAILED+=("$service") ;;
+        esac
     else
         UP_TO_DATE+=("$service")
         release_root="/home/kiwiton/releases/${service}"
         current_release=$(readlink -f "${release_root}/current" 2>/dev/null || true)
-        if [ ! -L "${release_root}/current" ] \
+        head_commit=$(git -C "$service_path" rev-parse --short=12 HEAD 2>/dev/null || true)
+        # Also re-snapshot when HEAD moved without this script (e.g. a manual deploy.sh run)
+        if [ -n "$head_commit" ] && ! has_local_edits "$service" && {
+            [ ! -L "${release_root}/current" ] \
             || [ ! -d "$current_release" ] \
-            || [ -z "$(find "$current_release" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            || [ "$(basename "$current_release")" != "$head_commit" ] \
+            || [ -z "$(find "$current_release" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; }; then
             snapshot_release "$service"
         fi
     fi
@@ -250,9 +267,14 @@ log "=== Auto-update check complete ==="
 log "Updated: ${#UPDATED[@]} services"
 log "Up-to-date: ${#UP_TO_DATE[@]} services"
 log "Failed: ${#FAILED[@]} services"
+log "Skipped (local edits): ${#SKIPPED[@]} services"
 
 if [ ${#UPDATED[@]} -gt 0 ]; then
     log "Updated services: ${UPDATED[*]}"
+fi
+
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+    error "Skipped services with server-side edits: ${SKIPPED[*]}"
 fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
