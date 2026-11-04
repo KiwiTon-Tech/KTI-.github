@@ -115,7 +115,9 @@ jobs:
 
   deploy:
     needs: lint-and-test
-    if: ${{ inputs.deploy_enabled && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    # Off unless the org/repo variable KTI_ACTIONS_DEPLOY is 'true': the cPanel
+    # cron (auto-update.sh) is the deployer, with tests, releases and rollback.
+    if: ${{ inputs.deploy_enabled && vars.KTI_ACTIONS_DEPLOY == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-${{ inputs.app_path }}

@@ -756,3 +756,7 @@ install):
 > services; `false` runs lint+test only for package repos. The cPanel
 > secrets (`CPANEL_HOST`/`USER`/`SSH_KEY`) are optional at the workflow
 > contract level so a package repo without them can still call the workflow.
+>
+> **Actions deploy is off by default.** The `deploy` job also requires the
+> org/repo variable `KTI_ACTIONS_DEPLOY=true`; without it CI is lint+test
+> only and the cPanel cron (`~/bin/auto-update.sh`) does all deploys.
