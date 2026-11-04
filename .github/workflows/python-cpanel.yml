@@ -63,12 +63,23 @@ jobs:
           python-version: ${{ inputs.python_version }}
           cache: pip
 
+      # Short-lived read token from the kti-deploy-bot GitHub App (org var
+      # KTI_APP_ID + org secret KTI_PRIVATE_KEY) for private deps like kti-db.
+      - name: Mint GitHub App token for private deps
+        id: deps-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.KTI_APP_ID }}
+          private-key: ${{ secrets.KTI_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       # Required for any requirements.txt that pulls private KiwiTon-Tech
       # repos via git+https (e.g. kti-db). See ARCHITECTURE.md §8 "GitHub / CI".
-      # No-op if GH_DEPS_TOKEN isn't provided — public deps still install fine.
+      # Uses GH_DEPS_TOKEN if set, else the App token; no-op if neither exists.
       - name: Configure git auth for private GitHub deps
         env:
-          GH_DEPS_TOKEN: ${{ secrets.GH_DEPS_TOKEN }}
+          GH_DEPS_TOKEN: ${{ secrets.GH_DEPS_TOKEN || steps.deps-token.outputs.token }}
         run: |
           if [ -n "$GH_DEPS_TOKEN" ]; then
             # requirements use git+ssh URLs (the cPanel server has an SSH key);
@@ -78,7 +89,7 @@ jobs:
             done
             echo "Git insteadOf rule installed for github.com."
           else
-            echo "GH_DEPS_TOKEN not set — skipping (only works for fully public deps)."
+            echo "No GH_DEPS_TOKEN or App token — skipping (only works for fully public deps)."
           fi
 
       - name: Install dependencies
@@ -97,14 +108,16 @@ jobs:
         run: |
           if [ -d tests ] || [ -d test ]; then
             pip install pytest
-            pytest -q
+            python -m pytest -q  # -m puts the repo root on sys.path (import app)
           else
             echo "No tests directory found — skipping."
           fi
 
   deploy:
     needs: lint-and-test
-    if: ${{ inputs.deploy_enabled && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    # Off unless the org/repo variable KTI_ACTIONS_DEPLOY is 'true': the cPanel
+    # cron (auto-update.sh) is the deployer, with tests, releases and rollback.
+    if: ${{ inputs.deploy_enabled && vars.KTI_ACTIONS_DEPLOY == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-${{ inputs.app_path }}
