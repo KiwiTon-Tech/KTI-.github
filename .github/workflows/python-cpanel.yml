@@ -108,7 +108,7 @@ jobs:
         run: |
           if [ -d tests ] || [ -d test ]; then
             pip install pytest
-            pytest -q
+            python -m pytest -q  # -m puts the repo root on sys.path (import app)
           else
             echo "No tests directory found — skipping."
           fi
